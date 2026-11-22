@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, ilike, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, isNull, lt, lte, max, ne, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { machineKey } from "@/domain/issue-check";
 import { validateCycleDates, validateMachine, validateTank, validateUser, type TankErrors, type UserErrors } from "@/domain/settings-rules";
@@ -204,4 +204,11 @@ export async function updateCycleDates(id: string, start: string, end: string): 
     }
     return { ok: true as const, message: "บันทึกวันที่ของรอบแล้ว" };
   });
+}
+
+// ───────────── project sync (from BookCare) ─────────────
+
+export async function lastProjectSync(): Promise<Date | null> {
+  const [r] = await db.select({ at: max(projects.syncedAt) }).from(projects);
+  return r?.at ?? null;
 }

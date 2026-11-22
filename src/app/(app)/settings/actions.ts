@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdministrator } from "@/lib/session";
+import { BookcareProjectSource, bookcareConfigured, ProjectSourceError } from "@/server/projects/bookcare-source";
+import { syncProjects } from "@/server/projects/sync-projects";
 import { createUser, resetPassword, saveMachine, saveTank, setUserActive, updateCycleDates, updateUser } from "@/server/settings/settings-service";
 
 const isId = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
@@ -67,4 +69,17 @@ export async function updateCycleDatesAction(id: string, start: string, end: str
     revalidatePath("/invoices");
   }
   return res;
+}
+
+/** pull the project list from BookCare (read-only role) — the only way `projects` changes besides the seed */
+export async function syncProjectsAction(): Promise<{ ok: boolean; message: string }> {
+  await requireAdministrator();
+  if (!bookcareConfigured()) return { ok: false, message: "ยังไม่ได้เชื่อมต่อ BookCare (ยังไม่ได้ตั้ง BOOKCARE_DATABASE_URL)" };
+  try {
+    const r = await syncProjects(new BookcareProjectSource());
+    revalidatePath("/settings/projects");
+    return { ok: true, message: `ซิงก์แล้ว ${r.upserted} โครงการ` + (r.deactivated ? ` ปิด ${r.deactivated} โครงการที่ไม่มีใน BookCare แล้ว` : "") };
+  } catch (e) {
+    return { ok: false, message: e instanceof ProjectSourceError ? e.message : "ซิงก์ไม่สำเร็จ ลองอีกครั้ง" };
+  }
 }
