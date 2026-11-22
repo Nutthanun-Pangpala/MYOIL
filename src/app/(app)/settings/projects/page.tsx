@@ -1,5 +1,8 @@
 import { Card, Pill, linkButton } from "@/components/ui";
-import { listProjects } from "@/server/settings/settings-service";
+import { lastProjectSync, listProjects } from "@/server/settings/settings-service";
+import { bookcareConfigured } from "@/server/projects/bookcare-source";
+import { thaiShort } from "@/domain/thai-date";
+import { SyncButton } from "./sync-button";
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
@@ -9,10 +12,17 @@ export default async function ProjectsPage({ searchParams }: { searchParams: SP 
   const q = one(sp.q);
   const status = (["open", "closed"].includes(one(sp.status)) ? one(sp.status) : "all") as "all" | "open" | "closed";
   const { rows, total } = await listProjects(q, status);
+  const last = await lastProjectSync();
+  const lastDay = last ? thaiShort(last.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" })) : null;
+  const lastTime = last ? last.toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" }) : null;
   const input = "h-11 rounded-control border border-line bg-card px-3 text-[15px]";
   return (
     <div className="flex flex-col gap-4">
       <p className="text-[14px]">รายชื่อโครงการมาจาก BookCare MYOIL ดูได้อย่างเดียว ถ้าต้องเพิ่มโครงการ แก้ชื่อ หรือปิดโครงการ ให้ทำใน BookCare แล้วรายชื่อในหน้านี้จะเปลี่ยนตามเอง</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <SyncButton configured={bookcareConfigured()} />
+        <span className="text-[13px] text-muted">{lastDay ? `ซิงก์ล่าสุด ${lastDay} ${lastTime} น.` : "ยังไม่เคยซิงก์"}</span>
+      </div>
       <form method="get" className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-[13px] text-muted">
           ค้นหาโครงการ

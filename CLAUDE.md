@@ -121,3 +121,8 @@ Never run `db:seed` against a shared database — it deletes the demo accounts f
 - **OBS-17**: `purchaseOddities()` (domain/purchase-calc.ts) — price >20% from the latest daily price, liters over the tank capacity (once set), liters <100 → the form asks "ยืนยันบันทึก"; server returns `confirm: string[]`, resend with `confirmed`. Numbers are BA proposals.
 - **OBS-18**: purchases can be edited / cancelled (reason) / restored, never deleted; locked when the cycle covering the date is closed. Columns `fuel_purchases.cancelled_*`, table `purchase_audit`; cancelled purchases count nowhere (ledger, totals). Editing a purchase does not change the shared daily price (it says so). **Neon: `scripts/sql/2026-11-22-purchase-changes.sql` before deploy.**
 - Already done before: OBS-02/10 (2 decimals refused, price valid from its date), Brief 10/11/12 texts. e2e: `e2e/ba-rulings.spec.ts`.
+
+## Projects from BookCare (22 Nov 2026)
+- `server/projects/bookcare-source.ts`: `BookcareProjectSource` reads BookCare's `projects` (ref_code, project_code, name, is_active) with the read-only role in `BOOKCARE_DATABASE_URL` (.env / Vercel only, never in chat or commits). `toProjectRecords` (pure, unit-tested) refuses an empty list (would close every project), a row without code/name, and a repeated ref_code. Driver errors are never echoed.
+- `/settings/projects`: admin button "ซิงก์โครงการจาก BookCare" → `syncProjectsAction` → `syncProjects` (upsert by ref_code; missing = inactive, never deleted) + "ซิงก์ล่าสุด". Disabled with a note when the URL is not set. Scheduled sync (Vercel Cron) not built yet.
+- BookCare side: role made by SQL (not the Console button) with `GRANT SELECT (ref_code, project_code, name, is_active) ON projects` only.
