@@ -1,0 +1,28 @@
+import type { Metadata } from "next";
+import { IBM_Plex_Sans_Thai, Kanit } from "next/font/google";
+import "./globals.css";
+
+const plex = IBM_Plex_Sans_Thai({
+  subsets: ["thai", "latin"],
+  weight: ["400", "600"],
+  variable: "--font-plex",
+});
+
+const kanit = Kanit({
+  subsets: ["thai", "latin"],
+  weight: ["500", "600"],
+  variable: "--font-kanit",
+});
+
+export const metadata: Metadata = {
+  title: "MYOIL — สมุดบัญชีน้ำมัน U WORK 999",
+  description: "บันทึกน้ำมันเข้า-ออกรถเติมน้ำมัน และออกใบแจ้งค่าใช้จ่ายรายโครงการ",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="th" className={`${plex.variable} ${kanit.variable}`}>
+      <body className="antialiased">{children}</body>
+    </html>
+  );
+}

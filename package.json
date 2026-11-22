@@ -1,0 +1,49 @@
+{
+  "name": "myoil",
+  "version": "0.1.0",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "db:up": "docker compose up -d",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:studio": "drizzle-kit studio",
+    "db:seed": "tsx --env-file=.env src/db/seed.ts",
+    "db:mockup": "npm run db:seed && tsx --env-file=.env src/db/mockup.ts",
+    "setup": "docker compose up -d && sleep 3 && drizzle-kit push --force && npm run db:seed",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:issues": "playwright test e2e/issues.spec.ts",
+    "test:e2e:invoices": "playwright test e2e/invoices.spec.ts",
+    "test:e2e:settings": "playwright test e2e/settings.spec.ts",
+    "test:e2e:purchases": "playwright test e2e/purchases.spec.ts e2e/leftovers.spec.ts",
+    "test:e2e:reports": "playwright test e2e/ledger.spec.ts e2e/monthly.spec.ts e2e/overview.spec.ts",
+    "test:e2e:auth": "playwright test e2e/auth.spec.ts",
+    "test:e2e:ba": "playwright test e2e/ba-rulings.spec.ts",
+    "e2e:install": "playwright install chromium"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.0",
+    "exceljs": "^4.4.0",
+    "next": "^15.5.0",
+    "postgres": "^3.4.5",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.0",
+    "tailwindcss": "^4.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5",
+    "vitest": "^2.1.0"
+  }
+}

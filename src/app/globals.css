@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+/* Same design system as BookCare (decision: separate app, shared tokens). */
+@theme {
+  --font-sans: var(--font-plex), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-kanit), var(--font-plex), ui-sans-serif, sans-serif;
+
+  --color-card: #ffffff;
+  --color-page: #f5f5f3;
+  --color-earth: #4a3426;
+  --color-earth-2: #5e4636;
+  --color-ink: #211a15;
+  --color-muted: #6f655d;
+  --color-line: #e6e1da;
+  /* yellow = primary button and things that stand for fuel. Nothing else. */
+  --color-safety: #ffc72c;
+  --color-safety-soft: #fff3cf;
+  --color-working: #1f8a4c;
+  --color-working-soft: #e2f1e8;
+  --color-idle: #a08670;
+  --color-idle-soft: #efe8e1;
+  --color-repair: #c8402f;
+  --color-repair-soft: #f8e3df;
+
+  --radius-card: 20px;
+  --radius-control: 12px;
+}
+
+body {
+  @apply bg-page text-ink font-sans;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+}
+
+@theme {
+  --color-sidebar-text: #e6e1da;
+  --color-sidebar-sub: #e6e1da;
+  --color-safety-line: #e0a800;
+  --color-safety-deep: #c99400;
+  --color-row-hover: #faf9f7;
+  --color-negative: #c8402f;
+  --color-tank: #33241a;
+  --color-tank-deep: #1c130d;
+  --color-tank-text: #cbbfb2;
+  --color-tank-negative: #ff9c8a;
+  --color-white-14: rgb(255 255 255 / 0.14);
+}
+
+/* numbers line up in columns */
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* data tables (design: table.t) */
+table.t {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+table.t th {
+  font-weight: 500;
+  color: var(--color-muted);
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-line);
+  white-space: nowrap;
+  background: var(--color-page);
+}
+table.t th:first-child {
+  border-radius: 10px 0 0 10px;
+}
+table.t th:last-child {
+  border-radius: 0 10px 10px 0;
+}
+table.t td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--color-line);
+  vertical-align: middle;
+}
+table.t .n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+table.t tbody tr:hover td {
+  background: var(--color-row-hover);
+}
+table.t tfoot td {
+  font-weight: 600;
+  border-bottom: 0;
+  border-top: 2px solid var(--color-ink);
+}
+
+/* ตารางรายเดือน (design: table.m) — first and last columns stay while the days scroll */
+table.m {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  white-space: nowrap;
+}
+table.m th,
+table.m td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--color-line);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  background: var(--color-card);
+}
+table.m th {
+  font-weight: 500;
+  color: var(--color-muted);
+}
+table.m .name {
+  position: sticky;
+  left: 0;
+  text-align: left;
+  min-width: 112px;
+  border-right: 1px solid var(--color-line);
+  color: var(--color-ink);
+  font-weight: 500;
+}
+table.m .idx {
+  position: sticky;
+  left: 0;
+  min-width: 56px;
+  max-width: 56px;
+  color: var(--color-muted);
+  font-weight: 400;
+}
+table.m .name.second {
+  left: 56px;
+}
+table.m .sum {
+  position: sticky;
+  right: 0;
+  border-left: 1px solid var(--color-line);
+  font-weight: 600;
+  color: var(--color-ink);
+  min-width: 72px;
+}
+table.m tfoot td,
+table.m tfoot th {
+  border-top: 2px solid var(--color-ink);
+  border-bottom: 0;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+table.m .z {
+  color: var(--color-muted);
+}
+
+/* รถเติมน้ำมัน (overview): the fuel surface moves */
+@keyframes myoil-wave {
+  from { transform: translateX(0); }
+  to { transform: translateX(-120px); }
+}
+.wave-a { animation: myoil-wave 3.4s linear infinite; }
+.wave-b { animation: myoil-wave 5.8s linear infinite reverse; }
+@media (prefers-reduced-motion: reduce) {
+  .wave-a, .wave-b { animation: none; }
+}
+
+/* printed invoices: A4 portrait, black on white, one project per page */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .invoice-sheet {
+    width: auto !important;
+    min-height: 0 !important;
+    border: 0 !important;
+    padding: 0 !important;
+    break-after: page;
+  }
+  .invoice-sheet:last-child {
+    break-after: auto;
+  }
+  .invoice-sheet th {
+    background: #fff !important;
+    color: #000 !important;
+  }
+}

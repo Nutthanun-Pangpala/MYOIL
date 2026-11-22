@@ -1,0 +1,55 @@
+import { isIsoDate } from "./iso-date";
+import { TWO_DECIMALS_MESSAGE, hasAtMostTwoDecimals } from "./money";
+
+/** Validation for the settings screens. Pure: every problem is returned at once, keyed by field. */
+
+const dayAfter = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+
+export function validateCycleDates(a: {
+  prev: { start: string; end: string } | null;
+  next: { start: string; end: string } | null;
+  start: string;
+  end: string;
+}): string | null {
+  if (!isIsoDate(a.start) || !isIsoDate(a.end)) return "ใส่วันที่ให้ครบและถูกต้อง";
+  if (a.end < a.start) return "วันสิ้นสุดอยู่ก่อนวันเริ่ม";
+  if (a.prev && a.start !== dayAfter(a.prev.end)) return `วันเริ่มต้องเป็นวันถัดจากวันสิ้นสุดของรอบก่อน (${dayAfter(a.prev.end)}) รอบต้องต่อกันโดยไม่มีวันว่างและไม่ซ้อนกัน`;
+  if (a.next && a.end >= a.next.end) return "วันสิ้นสุดต้องอยู่ก่อนวันสิ้นสุดของรอบถัดไป เพื่อให้รอบถัดไปเหลืออย่างน้อย 1 วัน";
+  return null;
+}
+
+export type TankErrors = { capacity?: string; low?: string; opening?: string };
+
+export function validateTank(t: { capacity: number | null; low: number | null; opening: number; openingDate: string | null }): TankErrors {
+  const e: TankErrors = {};
+  if (t.capacity !== null) {
+    if (!(t.capacity > 0)) e.capacity = "ความจุต้องมากกว่า 0 ลิตร";
+    else if (!hasAtMostTwoDecimals(t.capacity)) e.capacity = TWO_DECIMALS_MESSAGE;
+  }
+  if (t.low !== null) {
+    if (t.low < 0) e.low = "ใส่ตั้งแต่ 0 ลิตรขึ้นไป";
+    else if (!hasAtMostTwoDecimals(t.low)) e.low = TWO_DECIMALS_MESSAGE;
+    else if (t.capacity !== null && t.low > t.capacity) e.low = "ค่าเตือนต้องไม่เกินความจุถัง";
+  }
+  if (!Number.isFinite(t.opening) || t.opening < 0) e.opening = "ใส่ยอดยกมาตั้งแต่ 0 ลิตรขึ้นไป";
+  else if (!hasAtMostTwoDecimals(t.opening)) e.opening = TWO_DECIMALS_MESSAGE;
+  return e;
+}
+
+export type UserErrors = { name?: string; email?: string; role?: string; projects?: string; password?: string };
+export const ROLES = ["store_admin", "project_viewer", "executive", "system_admin"] as const;
+export const MIN_PASSWORD = 8;
+
+export function validateUser(u: { name: string; email: string; role: string; projectIds: string[]; password: string | null }): UserErrors {
+  const e: UserErrors = {};
+  if (!u.name.trim()) e.name = "ใส่ชื่อ";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(u.email.trim())) e.email = "ใส่อีเมลให้ถูกต้อง";
+  if (!(ROLES as readonly string[]).includes(u.role)) e.role = "เลือกบทบาท";
+  else if (u.role === "project_viewer" && u.projectIds.length === 0) e.projects = "เลือกโครงการที่ดูแลอย่างน้อย 1 โครงการ";
+  if (u.password !== null && u.password.length < MIN_PASSWORD) e.password = `รหัสผ่านอย่างน้อย ${MIN_PASSWORD} ตัวอักษร`;
+  return e;
+}
+
+export function validateMachine(m: { code: string }): { code?: string } {
+  return m.code.trim() ? {} : { code: "ใส่รหัสหรือทะเบียน" };
+}
