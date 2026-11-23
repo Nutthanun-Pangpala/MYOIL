@@ -9,6 +9,8 @@ import { requireUser } from "@/lib/session";
 import { loadOverview } from "@/server/overview/overview-service";
 import { CycleSelect } from "./cycle-select";
 
+export const metadata = { title: "ภาพรวม" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 

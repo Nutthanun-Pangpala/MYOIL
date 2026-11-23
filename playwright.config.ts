@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3100;
+/** key for the BookCare API specs; only a dev server started by Playwright gets it (stop any server you started by hand) */
+export const TEST_PUSH_KEY = "e2e-bookcare-push-key-0123456789abcdef0123456789";
 
 /**
  * End-to-end tests run against a real dev server and the real local Postgres (`npm run db:up` first).
@@ -27,6 +29,7 @@ export default defineConfig({
     command: `npx next dev -p ${PORT}`,
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: true,
+    env: { BOOKCARE_PUSH_KEY: TEST_PUSH_KEY },
     timeout: 120_000,
   },
 });

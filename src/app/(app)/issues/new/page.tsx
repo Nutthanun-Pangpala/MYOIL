@@ -2,6 +2,8 @@ import { requireWriter } from "@/lib/session";
 import { machineOptions, projectOptions } from "@/server/issues/issue-service";
 import { IssueForm } from "./issue-form";
 
+export const metadata = { title: "ลงใบจ่ายใหม่" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 

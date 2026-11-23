@@ -23,7 +23,7 @@ async function main() {
 
   // records first (they point at users), `projects` stays; the book starts empty again
   await db.execute(
-    sql`truncate table fuel_issue_audit, fuel_issue_photos, fuel_issue_lines, fuel_issues, fuel_purchases, purchase_audit, purchase_bill_photos, ledger_notes, stock_checks, fuel_prices, invoices, cycle_events, claim_cycles, machines, user_projects restart identity cascade`,
+    sql`truncate table fuel_route_stops, fuel_routes, fuel_issue_audit, fuel_issue_photos, issue_signed_photos, fuel_issue_line_photos, fuel_issue_lines, fuel_issues, fuel_purchases, purchase_audit, purchase_bill_photos, ledger_notes, stock_checks, fuel_prices, invoices, cycle_events, claim_cycles, machines, user_projects restart identity cascade`,
   );
   await db.delete(schema.appSettings);
 

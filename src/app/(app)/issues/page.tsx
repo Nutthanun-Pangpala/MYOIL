@@ -8,11 +8,14 @@ import { requireUser } from "@/lib/session";
 import { sumAmounts, sumLiters } from "@/domain/money";
 import { listIssues, projectOptions, type IssueBadge } from "@/server/issues/issue-service";
 
+export const metadata = { title: "ใบจ่ายน้ำมัน" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
 const BADGE: Record<IssueBadge, { tone: "ok" | "wait" | "bad"; text: string }> = {
   unsigned: { tone: "wait", text: "ยังไม่เซ็นรับ" },
+  pending_review: { tone: "wait", text: "รอตรวจ" },
   pending_price: { tone: "wait", text: "รอราคา" },
   invoiced: { tone: "ok", text: "อยู่ในใบแจ้งแล้ว" },
   cancelled: { tone: "bad", text: "ยกเลิก" },
@@ -23,10 +26,10 @@ export default async function IssuesPage({ searchParams }: { searchParams: SP })
   const sp = await searchParams;
   const rawFrom = one(sp.from), rawTo = one(sp.to);
   const badDate = (rawFrom !== "" && !isIsoDate(rawFrom)) || (rawTo !== "" && !isIsoDate(rawTo));
-  const f = { from: isIsoDate(rawFrom) ? rawFrom : "", to: isIsoDate(rawTo) ? rawTo : "", projectId: one(sp.project), q: one(sp.q), unsigned: one(sp.signed) === "no", machine: one(sp.machine), status: ["cancelled", "active"].includes(one(sp.status)) ? (one(sp.status) as "cancelled" | "active") : undefined };
+  const f = { from: isIsoDate(rawFrom) ? rawFrom : "", to: isIsoDate(rawTo) ? rawTo : "", projectId: one(sp.project), q: one(sp.q), unsigned: one(sp.signed) === "no", machine: one(sp.machine), status: ["cancelled", "active"].includes(one(sp.status)) ? (one(sp.status) as "cancelled" | "active") : undefined, review: one(sp.review) === "pending" ? ("pending" as const) : undefined };
 
   const [rows, projects] = await Promise.all([
-    listIssues(session, { from: f.from || undefined, to: f.to || undefined, projectId: f.projectId || undefined, q: f.q || undefined, unsigned: f.unsigned, machine: f.machine || undefined, status: f.status }),
+    listIssues(session, { from: f.from || undefined, to: f.to || undefined, projectId: f.projectId || undefined, q: f.q || undefined, unsigned: f.unsigned, machine: f.machine || undefined, status: f.status, review: f.review }),
     projectOptions(session),
   ]);
 
@@ -34,7 +37,7 @@ export default async function IssuesPage({ searchParams }: { searchParams: SP })
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const page = Math.min(pages, Math.max(1, Number(one(sp.page)) || 1));
   const shown = rows.slice((page - 1) * PAGE, page * PAGE);
-  const keep = new URLSearchParams(Object.entries({ from: f.from, to: f.to, project: f.projectId, q: f.q, machine: f.machine, status: f.status ?? "", signed: f.unsigned ? "no" : "" }).filter(([, v]) => v));
+  const keep = new URLSearchParams(Object.entries({ from: f.from, to: f.to, project: f.projectId, q: f.q, machine: f.machine, status: f.status ?? "", signed: f.unsigned ? "no" : "", review: f.review ?? "" }).filter(([, v]) => v));
   const link = (p: number) => `/issues?${new URLSearchParams([...keep, ["page", String(p)]])}`;
   const counted = rows.filter((r) => !r.badges.includes("cancelled"));
   const totalLiters = sumLiters(counted.map((r) => r.liters));
@@ -89,6 +92,7 @@ export default async function IssuesPage({ searchParams }: { searchParams: SP })
           </select>
         </label>
         {f.unsigned && <input type="hidden" name="signed" value="no" />}
+        {f.review && <input type="hidden" name="review" value="pending" />}
         <button type="submit" className={linkButton()}>
           กรอง
         </button>
@@ -106,7 +110,7 @@ export default async function IssuesPage({ searchParams }: { searchParams: SP })
       <Card className="overflow-x-auto p-2">
         {rows.length === 0 ? (
           <p className="p-8 text-center text-muted">
-            {f.from || f.to || f.projectId || f.q || f.machine || f.status || f.unsigned ? "ไม่พบใบจ่ายที่ตรงกับตัวกรอง" : "ยังไม่มีใบจ่าย"}
+            {f.from || f.to || f.projectId || f.q || f.machine || f.status || f.unsigned || f.review ? "ไม่พบใบจ่ายที่ตรงกับตัวกรอง" : "ยังไม่มีใบจ่าย"}
           </p>
         ) : (
           <table className="w-full border-collapse text-[14px]">

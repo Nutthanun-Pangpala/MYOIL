@@ -11,6 +11,11 @@ import { getIssue } from "@/server/issues/issue-service";
 import { stockOn } from "@/server/ledger/ledger-service";
 import { canOpen } from "@/lib/nav";
 import { IssueActionsPanel } from "./issue-actions-panel";
+import { SignedPhotoCard } from "./signed-photo-card";
+import { ReviewCard } from "./review-card";
+import { getReview } from "@/server/issues/review-service";
+
+export const metadata = { title: "รายละเอียดใบจ่าย" };
 
 const ACTION: Record<string, string> = { create: "บันทึกใบ", update: "แก้ไข", cancel: "ยกเลิกใบ", restore: "นำกลับมา" };
 const FIELD: Record<string, string> = {
@@ -22,7 +27,10 @@ const FIELD: Record<string, string> = {
   receivedSigned: "เซ็นรับ",
   receiverName: "ผู้เซ็นรับ",
   reason: "เหตุผล",
+  photo: "รูปใบเซ็น",
   lines: "รายการ",
+  review: "การตรวจ",
+  machine: "เครื่องจักร",
 };
 const show = (v: unknown) => (v === true ? "เซ็นแล้ว" : v === false ? "ยังไม่เซ็น" : v === null || v === "" ? "-" : String(v));
 function describe(changes: unknown): string {
@@ -38,17 +46,18 @@ export default async function IssueDetail({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ saved?: string }>;
+  searchParams: Promise<{ saved?: string; photo?: string }>;
 }) {
   const session = await requireUser();
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const d = await getIssue(session, id);
   if (!d) notFound();
-  const { saved } = await searchParams;
+  const { saved, photo } = await searchParams;
   const { head, lines, audit } = d;
   const lock = changeLock({ cancelled: head.cancelledAt !== null, closedCycleLabel: d.closedCycleLabel });
 
+  const review = await getReview(head.id);
   const pending = lines.some((l) => l.amount === null);
   // OBS-01: a slip is the paper truth, so it saves; the page says why the balance may be wrong
   const stock = !head.cancelledAt && canOpen(session.role, "/ledger") ? await stockOn(head.issueDate) : null;
@@ -72,6 +81,7 @@ export default async function IssueDetail({
         </h1>
         {head.cancelledAt && <Pill tone="bad">ยกเลิก</Pill>}
         {!head.cancelledAt && !head.receivedSigned && <Pill tone="wait">ยังไม่เซ็นรับ</Pill>}
+        {!head.cancelledAt && review?.status === "pending_review" && <Pill tone="wait">รอตรวจ</Pill>}
         {!head.cancelledAt && pending && <Pill tone="wait">รอราคา</Pill>}
       </div>
 
@@ -87,6 +97,26 @@ export default async function IssueDetail({
         </p>
       )}
       {canWriteFuel(session) && <IssueActionsPanel id={head.id} cancelled={head.cancelledAt !== null} signed={head.receivedSigned} lock={lock} />}
+
+      {review && (
+        <ReviewCard
+          id={head.id}
+          status={review.status}
+          canEdit={canWriteFuel(session) && !head.cancelledAt}
+          lock={lock}
+          flags={review.flags}
+          confirmedWarnings={review.confirmedWarnings}
+          driverName={review.driverName}
+          recordedAt={review.recordedAt}
+          receivedAt={review.receivedAt}
+          unsignedReason={review.unsignedReason}
+          reviewedBy={review.reviewedBy}
+          reviewedAt={review.reviewedAt}
+          editedAfterSign={review.editedAfterSign}
+          lines={review.lines.map((l) => ({ ...l, liters: formatLiters(l.liters), hourMeter: l.hourMeter === null ? "" : String(l.hourMeter) }))}
+          knownMachines={review.knownMachines}
+        />
+      )}
 
       <Card className="grid gap-4 p-5 sm:grid-cols-2">
         {[
@@ -144,9 +174,9 @@ export default async function IssueDetail({
         </table>
       </Card>
 
-      <Card className="p-5 text-[14px] text-muted">
-        รูปแนบ รูปมิเตอร์ และลายเซ็นบนจอ จะแสดงที่นี่ (ขั้นที่ 2)
-      </Card>
+      <SignedPhotoCard id={head.id} photoAt={d.photoAt} canEdit={canWriteFuel(session) && head.cancelledAt === null} lock={lock} failedOnSave={photo === "failed"} />
+
+      <Card className="p-5 text-[14px] text-muted">รูปมิเตอร์และลายเซ็นบนจอ จะแสดงที่นี่ (ขั้นที่ 2)</Card>
 
       <Card className="p-5">
         <h2 className="mb-3 font-display text-lg text-earth">ประวัติการแก้ไข</h2>

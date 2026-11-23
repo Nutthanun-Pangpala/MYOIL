@@ -105,6 +105,17 @@ export const fuelPurchases = pgTable(
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     cancelReason: text("cancel_reason"),
     cancelledBy: uuid("cancelled_by").references(() => users.id),
+    /** stage 2: 'office' = keyed by staff, 'mobile' = sent by BookCare; mobile ones wait for an admin ("pending_confirm") */
+    source: text("source").notNull().default("office"),
+    externalRef: uuid("external_ref").unique(),
+    status: text("status").notNull().default("confirmed"), // confirmed | pending_confirm
+    confirmedBy: uuid("confirmed_by").references(() => users.id),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }),
+    driverName: text("driver_name"),
+    driverBookcareId: text("driver_bookcare_id"),
+    requestHash: text("request_hash"),
+    flags: jsonb("flags").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
   },
   (t) => [index("fuel_purchases_date_idx").on(t.purchaseDate), check("fuel_purchases_liters_positive", sql`${t.liters} > 0`)],
 );
@@ -231,6 +242,8 @@ export const machines = pgTable("machines", {
   type: text("type"),
   assetCode: text("asset_code"),
   isRented: boolean("is_rented").notNull().default(false),
+  /** stage 2: a name a driver typed on the phone that matches nothing — held until an admin merges or accepts it */
+  pendingReview: boolean("pending_review").notNull().default(false),
   createdAt: stamp("created_at"),
 });
 
@@ -259,6 +272,23 @@ export const fuelIssues = pgTable(
     recordedBy: uuid("recorded_by")
       .notNull()
       .references(() => users.id),
+    /** stage 2: 'paper' = keyed by staff, 'mobile' = sent by BookCare (needs "ตรวจแล้ว" before it can be invoiced) */
+    source: text("source").notNull().default("paper"),
+    externalRef: uuid("external_ref").unique(), // the phone's UUID: sending twice = one slip
+    requestHash: text("request_hash"), // same ref + other content → 409 ref_conflict
+    reviewStatus: text("review_status").notNull().default("checked"), // pending_review | checked
+    reviewedBy: uuid("reviewed_by").references(() => users.id),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }), // taken on site (phone clock)
+    receivedAt: timestamp("received_at", { withTimezone: true }), // reached MYOIL
+    driverBookcareId: text("driver_bookcare_id"),
+    signatureRef: text("signature_ref"), // idempotency of the late signature
+    unsignedReason: text("unsigned_reason"),
+    flags: jsonb("flags").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    confirmedWarnings: jsonb("confirmed_warnings").$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+    editedAfterSign: boolean("edited_after_sign").notNull().default(false), // R7
+    /** the stop of the day's route this phone slip fills (contract §9.1); paper slips have none */
+    routeStopId: uuid("route_stop_id"),
     createdAt: stamp("created_at"),
     updatedAt: stamp("updated_at"),
   },
@@ -274,6 +304,18 @@ export const fuelIssues = pgTable(
  * one issue → many machine lines. Price and amount are frozen when saved (a closed cycle must not drift).
  * No price for the date (and none earlier) → price/amount stay NULL = "รอราคา"; they are filled when a price is set.
  */
+/** stage 2: the meter photo of one line, kept in the database (the old path-based fuel_issue_photos can't live on Vercel) */
+export const fuelIssueLinePhotos = pgTable("fuel_issue_line_photos", {
+  lineId: uuid("line_id")
+    .primaryKey()
+    .references(() => fuelIssueLines.id, { onDelete: "cascade" }),
+  mime: text("mime").notNull(),
+  sha256: text("sha256").notNull(),
+  takenAt: timestamp("taken_at", { withTimezone: true }),
+  data: bytea("data").notNull(),
+  createdAt: stamp("created_at"),
+});
+
 export const fuelIssueLines = pgTable(
   "fuel_issue_lines",
   {
@@ -308,6 +350,17 @@ export const fuelIssuePhotos = pgTable("fuel_issue_photos", {
   createdAt: stamp("created_at"),
 });
 
+/** photo of the signed paper slip (ใบเซ็น) — one per slip, kept in the database like the purchase bill photo (downsized JPEG/PNG ≤ 1 MB) */
+export const issueSignedPhotos = pgTable("issue_signed_photos", {
+  issueId: uuid("issue_id")
+    .primaryKey()
+    .references(() => fuelIssues.id, { onDelete: "cascade" }),
+  mime: text("mime").notNull(),
+  data: bytea("data").notNull(),
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  createdAt: stamp("created_at"),
+});
+
 /** every edit of an issue: who changed what, when (brief §7) */
 export const fuelIssueAudit = pgTable(
   "fuel_issue_audit",
@@ -322,4 +375,42 @@ export const fuelIssueAudit = pgTable(
     at: stamp("at"),
   },
   (t) => [index("fuel_issue_audit_issue_idx").on(t.issueId)],
+);
+
+// ───────────── route of the fuel truck (stage 2, 23 Nov 2026) ─────────────
+// The store admin plans each day: which projects, in which order, with a note. The driver can only fill
+// (or skip) the stops of the day (brief R20–R23). One route per day (one truck), one slip per stop.
+
+export const fuelRoutes = pgTable("fuel_routes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  routeDate: date("route_date", { mode: "string" }).notNull().unique(),
+  createdBy: uuid("created_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: stamp("created_at"),
+  updatedAt: stamp("updated_at"),
+});
+
+/** status is not stored: filled = has a slip that isn't cancelled; skipped = skip_ref set; else pending (domain/route.ts) */
+export const fuelRouteStops = pgTable(
+  "fuel_route_stops",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    routeId: uuid("route_id")
+      .notNull()
+      .references(() => fuelRoutes.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id),
+    note: text("note"),
+    issueId: uuid("issue_id").references(() => fuelIssues.id, { onDelete: "set null" }),
+    skipRef: uuid("skip_ref").unique(),
+    skipReason: text("skip_reason"),
+    skippedAt: timestamp("skipped_at", { withTimezone: true }),
+    skippedBy: text("skipped_by"), // the driver's name from BookCare
+    createdAt: stamp("created_at"),
+    updatedAt: stamp("updated_at"),
+  },
+  (t) => [index("fuel_route_stops_route_idx").on(t.routeId), unique("fuel_route_stops_issue_unique").on(t.issueId)],
 );

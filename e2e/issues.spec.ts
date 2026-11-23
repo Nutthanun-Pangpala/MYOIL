@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 import { keyIssue, login, resetData } from "./helpers";
 
+// 1×1 PNG: the browser really decodes it, then re-encodes it as a small JPEG
+const TINY_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
 const TODAY = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
 
 test.describe.configure({ mode: "serial" });
@@ -149,4 +154,49 @@ test.describe("changing a saved slip", () => {
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toContain("spreadsheetml");
   });
+});
+
+test("a photo of the signed paper can be attached with the new slip, replaced and removed", async ({ page }) => {
+  await login(page, "store");
+  await page.goto("/issues/new");
+  await page.getByLabel("เล่มที่").fill("9");
+  await page.getByLabel("เลขที่", { exact: true }).fill("91");
+  await page.getByLabel(/^วันที่/).fill(TODAY);
+  await page.getByLabel("โครงการ").fill("DEMO1");
+  await page.getByLabel("รายการหรือรหัสเครื่องจักร").first().fill("PC210");
+  await page.getByLabel("จำนวนน้ำมัน (ลิตร)").first().fill("5");
+  await page.getByLabel(/รูปใบเซ็น/).setInputFiles({ name: "signed.png", mimeType: "image/png", buffer: TINY_PNG });
+  await expect(page.getByText("แนบแล้ว: signed.png")).toBeVisible();
+  await page.getByRole("button", { name: "บันทึก", exact: true }).click();
+  await expect(page).toHaveURL(/\/issues\/[0-9a-f-]{36}/);
+
+  // the picture is on the slip's page and the server really serves it as an image
+  const img = page.getByAltText("รูปใบจ่ายที่เซ็นแล้ว");
+  await expect(img).toBeVisible();
+  const src = await img.getAttribute("src");
+  const res = await page.request.get(src!);
+  expect(res.status()).toBe(200);
+  expect(res.headers()["content-type"]).toBe("image/jpeg");
+
+  // replace it
+  await page.locator("#signed-photo").setInputFiles({ name: "again.png", mimeType: "image/png", buffer: TINY_PNG });
+  await expect(page.getByRole("status").filter({ hasText: "เปลี่ยนรูปแล้ว" })).toBeVisible();
+  await expect(page.getByText("รูปใบเซ็น: มีรูป → เปลี่ยนรูปแล้ว")).toBeVisible();
+
+  // remove it: asks first
+  await page.getByRole("button", { name: "ลบรูป" }).click();
+  await page.getByRole("button", { name: "ลบ", exact: true }).click();
+  await expect(page.getByText("ยังไม่มีรูปใบเซ็น")).toBeVisible();
+  await expect(page.getByText("รูปใบเซ็น: มีรูป → ลบรูปแล้ว")).toBeVisible();
+  expect((await page.request.get(src!)).status()).toBe(404);
+});
+
+test("a file that is not a picture is refused with a message, nothing is saved", async ({ page }) => {
+  await login(page, "store");
+  await page.goto("/issues");
+  await page.getByRole("row").filter({ hasText: "PC210" }).first().getByRole("link").first().click();
+  await expect(page).toHaveURL(/\/issues\/[0-9a-f-]{36}/);
+  await page.locator("#signed-photo").setInputFiles({ name: "x.png", mimeType: "image/png", buffer: Buffer.from("not an image") });
+  await expect(page.getByRole("alert").filter({ hasText: "เปิดรูปนี้ไม่ได้" })).toBeVisible();
+  await expect(page.getByText("ยังไม่มีรูปใบเซ็น")).toBeVisible();
 });

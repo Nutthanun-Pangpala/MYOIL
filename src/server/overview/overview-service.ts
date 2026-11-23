@@ -8,6 +8,7 @@ import { canOpen } from "@/lib/nav";
 import type { Session } from "@/lib/session";
 import { ledgerMonths, loadLedgerMonth, stockOn } from "@/server/ledger/ledger-service";
 import { visibleProjectIds } from "@/server/projects/project-scope";
+import { billableSql } from "@/server/issues/billable";
 
 /** everything the overview shows; parts a role may not see come back null */
 export async function loadOverview(session: Session, month: string, today: string) {
@@ -26,7 +27,7 @@ export async function loadOverview(session: Session, month: string, today: strin
           projectLabel: schema.projects.refCode,
           liters: schema.fuelIssueLines.liters,
           amount: schema.fuelIssueLines.amount,
-          signed: schema.fuelIssues.receivedSigned,
+          signed: billableSql,
         })
         .from(schema.fuelIssueLines)
         .innerJoin(schema.fuelIssues, eq(schema.fuelIssues.id, schema.fuelIssueLines.issueId))

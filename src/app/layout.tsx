@@ -15,7 +15,9 @@ const kanit = Kanit({
 });
 
 export const metadata: Metadata = {
-  title: "MYOIL — สมุดบัญชีน้ำมัน U WORK 999",
+  // each page sets its own name: the tab reads "ใบจ่ายน้ำมัน · MYOIL"; icon = src/app/icon.svg (23 Nov 2026)
+  title: { default: "MYOIL — สมุดบัญชีน้ำมัน U WORK 999", template: "%s · MYOIL" },
+  applicationName: "MYOIL",
   description: "บันทึกน้ำมันเข้า-ออกรถเติมน้ำมัน และออกใบแจ้งค่าใช้จ่ายรายโครงการ",
 };
 

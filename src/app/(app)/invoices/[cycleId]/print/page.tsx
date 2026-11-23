@@ -4,6 +4,8 @@ import { loadCycleView, loadInvoice } from "@/server/cycles/cycle-service";
 import { InvoiceSheet } from "../../invoice-sheet";
 import { PrintButton } from "./print-button";
 
+export const metadata = { title: "พิมพ์ใบแจ้งค่าใช้จ่าย" };
+
 /** every project's invoice of the cycle, one after another, one per printed page */
 export default async function PrintAll({ params }: { params: Promise<{ cycleId: string }> }) {
   const session = await requireUser();

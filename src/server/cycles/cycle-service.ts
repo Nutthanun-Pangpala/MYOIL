@@ -5,6 +5,7 @@ import { sumAmounts, sumLiters } from "@/domain/money";
 import { thaiMonthShort } from "@/domain/thai-date";
 import type { Session } from "@/lib/session";
 import { visibleProjectIds } from "../projects/project-scope";
+import { billableSql } from "../issues/billable";
 
 const { claimCycles, cycleEvents, fuelIssues, fuelIssueLines, invoices, machines, projects, users } = schema;
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -77,6 +78,8 @@ export type CycleView = {
   rows: InvoiceSummary[];
   totals: { projects: number; slips: number; liters: number; amount: number };
   unsigned: { slips: number; liters: number; projects: number };
+  /** signed phone slips nobody has checked yet: not invoiced, carried to the next cycle if the cycle closes now */
+  waitingCheck: { slips: number; liters: number };
   /** every live slip of the cycle (signed or not) — what the monthly table shows for these slips */
   allLiters: number;
   carriedIn: { slips: number; liters: number };
@@ -93,7 +96,8 @@ async function slipsOfCycle(session: Session, cycleId: string, onlyProject?: str
       issueDate: fuelIssues.issueDate,
       bookNo: fuelIssues.bookNo,
       docNo: fuelIssues.docNo,
-      signed: fuelIssues.receivedSigned,
+      signed: billableSql,
+      receivedSigned: fuelIssues.receivedSigned,
     })
     .from(fuelIssues)
     .where(
@@ -131,6 +135,7 @@ export async function loadCycleView(session: Session, cycleId: string): Promise<
   const pmap = new Map(proj.map((p) => [p.id, p]));
   const statuses = new Map((await db.select({ projectId: invoices.projectId, status: invoices.status }).from(invoices).where(eq(invoices.cycleId, cycleId))).map((i) => [i.projectId, i.status]));
 
+  const waitingCheck = { slips: 0, liters: 0 };
   const byProject = new Map<string, InvoiceSummary>();
   for (const s of slips) {
     const p = pmap.get(s.projectId)!;
@@ -149,6 +154,11 @@ export async function loadCycleView(session: Session, cycleId: string): Promise<
         unsignedLiters: 0,
       }).get(s.projectId)!;
     const liters = sumLiters(s.lines.map((l) => l.liters));
+    if (!s.signed && s.receivedSigned) {
+      waitingCheck.slips += 1;
+      waitingCheck.liters = sumLiters([waitingCheck.liters, liters]);
+      continue;
+    }
     if (!s.signed) {
       r.unsignedSlips += 1;
       r.unsignedLiters = sumLiters([r.unsignedLiters, liters]);
@@ -179,6 +189,7 @@ export async function loadCycleView(session: Session, cycleId: string): Promise<
       liters: sumLiters(unsignedRows.map((r) => r.unsignedLiters)),
       projects: unsignedRows.length,
     },
+    waitingCheck,
     allLiters,
     carriedIn: { slips: 0, liters: 0 },
   };
@@ -249,7 +260,7 @@ export async function closeCycle(session: Session, cycleId: string): Promise<Cyc
     if (c.status === "closed") return { ok: false as const, message: "รอบนี้ปิดแล้ว" };
 
     const heads = await tx
-      .select({ id: fuelIssues.id, projectId: fuelIssues.projectId, signed: fuelIssues.receivedSigned, cancelled: fuelIssues.cancelledAt })
+      .select({ id: fuelIssues.id, projectId: fuelIssues.projectId, signed: billableSql, cancelled: fuelIssues.cancelledAt })
       .from(fuelIssues)
       .where(eq(fuelIssues.claimCycleId, cycleId));
     const lines = heads.length

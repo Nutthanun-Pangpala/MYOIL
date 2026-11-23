@@ -21,6 +21,9 @@ export type PurchaseRow = {
   billNo: string | null;
   note: string | null;
   hasPhoto: boolean;
+  /** sent from the phone and not yet confirmed by an admin: counts in the tank, its price is not the day's price yet */
+  pendingConfirm: boolean;
+  flags: string[];
   cancelled: boolean;
   cancelReason: string | null;
   /** why it cannot be edited or cancelled now (closed cycle), else null */
@@ -78,6 +81,8 @@ export async function loadPurchasePage(month: string, today: string): Promise<Pu
       billNo: p.billNo,
       note: p.note,
       hasPhoto: withPhoto.has(p.id),
+      pendingConfirm: p.status === "pending_confirm",
+      flags: p.flags,
       cancelled: p.cancelledAt !== null,
       cancelReason: p.cancelReason,
       lock: closedCycles.some((c) => c.start <= p.purchaseDate && p.purchaseDate <= c.end) ? CLOSED_LOCK : null,
@@ -204,7 +209,7 @@ export async function setDailyPrice(session: Session, input: PriceInput): Promis
 
 export const CLOSED_LOCK = "ทำไม่ได้ รอบเคลมที่คลุมวันที่นี้ปิดแล้ว ให้ผู้ดูแลระบบเปิดรอบอีกครั้งก่อน";
 
-const FIELD_TH: Record<string, string> = { date: "วันที่", liters: "ลิตร", price: "ราคา/ลิตร", amount: "จำนวนเงิน", billNo: "เลขที่บิล", note: "หมายเหตุ", reason: "เหตุผล" };
+const FIELD_TH: Record<string, string> = { status: "สถานะ", date: "วันที่", liters: "ลิตร", price: "ราคา/ลิตร", amount: "จำนวนเงิน", billNo: "เลขที่บิล", note: "หมายเหตุ", reason: "เหตุผล" };
 function describeChanges(c: unknown): string {
   if (!c || typeof c !== "object") return "";
   return Object.entries(c as Record<string, [unknown, unknown]>)
@@ -285,5 +290,29 @@ export async function restorePurchase(session: Session, id: string): Promise<Cha
     await tx.update(schema.fuelPurchases).set({ cancelledAt: null, cancelReason: null, cancelledBy: null }).where(eq(schema.fuelPurchases.id, id));
     await tx.insert(schema.purchaseAudit).values({ purchaseId: id, userId: session.userId, action: "restore", changes: null });
     return { ok: true as const };
+  });
+}
+
+
+/** an admin confirms a purchase sent from the phone: the bill's price becomes the day's price (same rule as keying a purchase) */
+export async function confirmPurchase(session: Session, id: string): Promise<ChangeResult & { warnings?: string[] }> {
+  return db.transaction(async (tx) => {
+    const [cur] = await tx.select().from(schema.fuelPurchases).where(eq(schema.fuelPurchases.id, id)).for("update").limit(1);
+    if (!cur) return { ok: false as const, message: "ไม่พบรายการซื้อนี้" };
+    if (cur.cancelledAt) return { ok: false as const, message: "รายการที่ยกเลิกแล้วยืนยันไม่ได้ กด “นำกลับมา” ก่อน" };
+    if (cur.status === "confirmed") return { ok: true as const, warnings: [] };
+    if (await inClosedCycle(tx, cur.purchaseDate)) return { ok: false as const, message: CLOSED_LOCK };
+    await tx.update(schema.fuelPurchases).set({ status: "confirmed", confirmedBy: session.userId, confirmedAt: new Date() }).where(eq(schema.fuelPurchases.id, id));
+    await tx.insert(schema.purchaseAudit).values({ purchaseId: id, userId: session.userId, action: "update", changes: { status: ["รอยืนยัน", "ยืนยันแล้ว"] } });
+
+    const warnings: string[] = [];
+    const [existing] = await tx.select().from(schema.fuelPrices).where(eq(schema.fuelPrices.priceDate, cur.purchaseDate));
+    if (!existing) {
+      await tx.insert(schema.fuelPrices).values({ priceDate: cur.purchaseDate, pricePerLiter: cur.pricePerLiter, createdBy: session.userId });
+    } else if (existing.pricePerLiter !== cur.pricePerLiter) {
+      warnings.push(`ราคาประจำวันนี้ ${baht(existing.pricePerLiter)} บาท ไม่ตรงกับราคาที่ซื้อ ${baht(cur.pricePerLiter)} บาท — ใช้ราคาเดิมต่อ แก้ได้ที่ "ราคาประจำวัน"`);
+    }
+    warnings.push(...repriceWarnings(await repriceOpenLines(tx, cur.purchaseDate)));
+    return { ok: true as const, warnings };
   });
 }

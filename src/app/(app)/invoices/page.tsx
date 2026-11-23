@@ -9,6 +9,8 @@ import { requireUser } from "@/lib/session";
 import { cycleEventsOf, cycleLabel, listCycles, loadCycleView } from "@/server/cycles/cycle-service";
 import { CyclePanel } from "./cycle-panel";
 
+export const metadata = { title: "ใบแจ้งค่าใช้จ่าย" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
@@ -73,6 +75,17 @@ export default async function InvoicesPage({ searchParams }: { searchParams: SP 
           </p>
           <Link href="/issues?signed=no" className={linkButton()}>
             ดูใบที่ยังไม่เซ็นรับ
+          </Link>
+        </Card>
+      )}
+
+      {!closed && view.waitingCheck.slips > 0 && (
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
+          <p className="text-[14px]">
+            <strong>ตรวจก่อนปิดรอบ</strong> มีใบจากมือถือที่เซ็นรับแล้วแต่ยังไม่ได้ตรวจ {view.waitingCheck.slips} ใบ รวม {formatLiters(view.waitingCheck.liters)} ลิตร ถ้าปิดรอบตอนนี้ ใบเหล่านี้จะไม่อยู่ในใบแจ้งของรอบ {label} และถูกยกไปรอบถัดไป
+          </p>
+          <Link href="/issues?review=pending" className={linkButton()}>
+            ไปตรวจใบ
           </Link>
         </Card>
       )}

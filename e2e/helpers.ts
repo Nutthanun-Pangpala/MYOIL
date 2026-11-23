@@ -49,3 +49,12 @@ export async function recordPurchase(page: Page, p: { date: string; liters: stri
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/purchases\\?month=${p.date.slice(0, 7)}$`));
 }
+
+/** plan route stops for a day straight in the local DB (scripts/e2e-plan-route.ts); returns their ids in order */
+export function planStops(date: string, codes: string[]): string[] {
+  const out = execSync(`npx tsx --env-file=.env scripts/e2e-plan-route.ts ${date} ${codes.join(" ")}`, { encoding: "utf8" });
+  return JSON.parse(out.trim().split("\n").pop()!) as string[];
+}
+
+/** one fresh stop: every phone slip needs its own stop of the route (contract §9.1, 1 stop = 1 slip) */
+export const planStop = (date: string, code: string) => planStops(date, [code])[0];

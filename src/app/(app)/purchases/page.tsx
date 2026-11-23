@@ -11,6 +11,8 @@ import { loadPurchasePage } from "@/server/purchases/purchase-service";
 import { PurchasePanel } from "./purchase-panel";
 import { PurchaseRowActions } from "./row-actions";
 
+export const metadata = { title: "ซื้อน้ำมันเข้า" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 
@@ -88,6 +90,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                           <td className="n">{formatBaht(p.amount)}</td>
                           <td>
                             {p.billNo ?? ""}
+                            {p.pendingConfirm && !p.cancelled && <span className="ml-2 rounded bg-safety-soft px-1.5 text-[13px] no-underline">รอยืนยัน (จากมือถือ)</span>}
                             {p.hasPhoto && (
                               <a href={`/api/purchase-photo/${p.id}`} target="_blank" rel="noreferrer" className="ml-2 text-earth underline">
                                 ดูรูปบิล
@@ -113,7 +116,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                           </td>
                           {writer && (
                             <td className="no-underline">
-                              <PurchaseRowActions id={p.id} month={month} cancelled={p.cancelled} lock={p.lock} />
+                              <PurchaseRowActions id={p.id} month={month} cancelled={p.cancelled} lock={p.lock} pendingConfirm={p.pendingConfirm} />
                             </td>
                           )}
                         </tr>

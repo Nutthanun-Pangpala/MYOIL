@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireWriter } from "@/lib/session";
 import { parsePriceInput, parsePurchaseInput } from "@/server/purchases/parse-input";
-import { cancelPurchase, createPurchase, restorePurchase, setDailyPrice, updatePurchase, type ChangeResult, type SaveResult } from "@/server/purchases/purchase-service";
+import { cancelPurchase, confirmPurchase, createPurchase, restorePurchase, setDailyPrice, updatePurchase, type ChangeResult, type SaveResult } from "@/server/purchases/purchase-service";
 
 function refresh() {
   // purchases move the book and may price waiting slips
@@ -41,6 +41,13 @@ export async function cancelPurchaseAction(id: string, reason: string): Promise<
 export async function restorePurchaseAction(id: string): Promise<ChangeResult> {
   const session = await requireWriter();
   const r = await restorePurchase(session, id);
+  if (r.ok) refresh();
+  return r;
+}
+
+export async function confirmPurchaseAction(id: string): Promise<ChangeResult & { warnings?: string[] }> {
+  const session = await requireWriter();
+  const r = await confirmPurchase(session, id);
   if (r.ok) refresh();
   return r;
 }

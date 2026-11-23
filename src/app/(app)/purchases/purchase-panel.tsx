@@ -6,6 +6,7 @@ import { Button, Card } from "@/components/ui";
 import { completePurchase } from "@/domain/purchase-calc";
 import { formatBaht } from "@/lib/format";
 import { savePriceAction, savePurchaseAction, updatePurchaseAction } from "./actions";
+import { shrinkImage } from "@/lib/image-shrink";
 
 const toNum = (s: string): number | null => {
   const t = s.replace(/,/g, "").trim();
@@ -15,22 +16,6 @@ const toNum = (s: string): number | null => {
 };
 
 type Err = { field?: "date" | "liters" | "price" | "amount" | "photo"; text: string };
-
-/** downsize a picked image to ≤ 1280 px JPEG so it stays well under 1 MB */
-async function shrink(file: File): Promise<{ mime: string; base64: string } | null> {
-  try {
-    const bmp = await createImageBitmap(file);
-    const k = Math.min(1, 1280 / Math.max(bmp.width, bmp.height));
-    const c = document.createElement("canvas");
-    c.width = Math.round(bmp.width * k);
-    c.height = Math.round(bmp.height * k);
-    c.getContext("2d")!.drawImage(bmp, 0, 0, c.width, c.height);
-    const url = c.toDataURL("image/jpeg", 0.8);
-    return { mime: "image/jpeg", base64: url.slice(url.indexOf(",") + 1) };
-  } catch {
-    return null;
-  }
-}
 
 const input = "h-11 w-full rounded-control border bg-card px-3";
 const label = "text-sm";
@@ -166,7 +151,7 @@ export function PurchasePanel({
                   const f = e.target.files?.[0];
                   setError(null);
                   if (!f) return (setPhoto(null), setPhotoName(""));
-                  const small = await shrink(f);
+                  const small = await shrinkImage(f);
                   if (!small) return (setPhoto(null), setPhotoName(""), setError({ field: "photo", text: "เปิดรูปนี้ไม่ได้ เลือกไฟล์ JPG หรือ PNG" }));
                   setPhoto(small);
                   setPhotoName(f.name);

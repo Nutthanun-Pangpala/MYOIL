@@ -12,6 +12,6 @@ describe("navFor", () => {
     expect(navFor("project_viewer").map((n) => n.label).includes("สมุดคงเหลือ")).toBe(false);
   });
   it("system_admin sees everything", () => {
-    expect(navFor("system_admin").length).toBe(7);
+    expect(navFor("system_admin").length).toBe(8);
   });
 });
