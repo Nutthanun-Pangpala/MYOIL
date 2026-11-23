@@ -7,6 +7,8 @@ import { requireUser } from "@/lib/session";
 import { loadMonthly } from "@/server/monthly/monthly-service";
 import { MonthlyFilters } from "./monthly-filters";
 
+export const metadata = { title: "ตารางรายเดือน" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const DASH = "–";

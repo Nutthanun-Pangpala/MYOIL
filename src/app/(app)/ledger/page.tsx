@@ -11,6 +11,8 @@ import { loadLedgerMonth, loadLedgerNotes } from "@/server/ledger/ledger-service
 import { MeasuredInput } from "./measured-input";
 import { NoteInput } from "./note-input";
 
+export const metadata = { title: "สมุดคงเหลือ" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const DASH = "–";

@@ -3,17 +3,17 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { cancelPurchaseAction, restorePurchaseAction } from "./actions";
+import { cancelPurchaseAction, confirmPurchaseAction, restorePurchaseAction } from "./actions";
 
 /** edit · cancel (asks first, needs a reason) · restore — OBS-18 */
-export function PurchaseRowActions({ id, month, cancelled, lock }: { id: string; month: string; cancelled: boolean; lock: string | null }) {
+export function PurchaseRowActions({ id, month, cancelled, lock, pendingConfirm = false }: { id: string; month: string; cancelled: boolean; lock: string | null; pendingConfirm?: boolean }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
-  function run(fn: () => Promise<{ ok: boolean; message?: string }>) {
+  function run(fn: () => Promise<{ ok: boolean; message?: string; warnings?: string[] }>) {
     setMsg(null);
     start(async () => {
       try {
@@ -21,6 +21,7 @@ export function PurchaseRowActions({ id, month, cancelled, lock }: { id: string;
         if (r.ok) {
           setAsking(false);
           setReason("");
+          if (r.warnings?.length) setMsg(r.warnings.join(" · "));
           router.refresh();
         } else setMsg(r.message ?? "ทำไม่สำเร็จ");
       } catch {
@@ -40,6 +41,11 @@ export function PurchaseRowActions({ id, month, cancelled, lock }: { id: string;
           </button>
         ) : (
           <>
+            {pendingConfirm && (
+              <button type="button" className={link} disabled={busy} onClick={() => run(() => confirmPurchaseAction(id))}>
+                ยืนยัน
+              </button>
+            )}
             <Link href={`/purchases?month=${month}&edit=${id}`} className={link}>
               แก้ไข
             </Link>

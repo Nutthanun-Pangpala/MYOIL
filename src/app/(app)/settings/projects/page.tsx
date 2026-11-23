@@ -4,6 +4,8 @@ import { bookcareConfigured } from "@/server/projects/bookcare-source";
 import { thaiShort } from "@/domain/thai-date";
 import { SyncButton } from "./sync-button";
 
+export const metadata = { title: "โครงการ" };
+
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 

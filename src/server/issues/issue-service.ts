@@ -9,8 +9,9 @@ import type { Session } from "@/lib/session";
 import { cycleIdFor } from "../cycles/cycle-service";
 import { priceForDate } from "../prices/price-queries";
 import { visibleProjectIds } from "../projects/project-scope";
+import { checkSlipPhoto, type SlipPhotoInput } from "./slip-photo";
 
-const { fuelIssues, fuelIssueLines, fuelIssueAudit, machines, projects, claimCycles } = schema;
+const { fuelIssues, fuelIssueLines, fuelIssueLinePhotos, fuelIssueAudit, machines, projects, claimCycles } = schema;
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -174,7 +175,7 @@ export async function createIssue(session: Session, input: IssueInput): Promise<
 
 // ───────────── read ─────────────
 
-export type IssueBadge = "unsigned" | "pending_price" | "invoiced" | "cancelled";
+export type IssueBadge = "unsigned" | "pending_review" | "pending_price" | "invoiced" | "cancelled";
 
 export type IssueRow = {
   id: string;
@@ -189,7 +190,7 @@ export type IssueRow = {
   badges: IssueBadge[];
 };
 
-export type IssueFilters = { from?: string; to?: string; projectId?: string; q?: string; /** only slips not yet signed for (and not cancelled) */ unsigned?: boolean; /** part of a machine code */ machine?: string; status?: "cancelled" | "active" };
+export type IssueFilters = { from?: string; to?: string; projectId?: string; q?: string; /** only slips not yet signed for (and not cancelled) */ unsigned?: boolean; /** part of a machine code */ machine?: string; status?: "cancelled" | "active"; /** only slips from the phone that nobody has checked yet */ review?: "pending" };
 
 export async function listIssues(session: Session, f: IssueFilters): Promise<IssueRow[]> {
   const scope = await visibleProjectIds(session);
@@ -203,6 +204,7 @@ export async function listIssues(session: Session, f: IssueFilters): Promise<Iss
       docNo: fuelIssues.docNo,
       issueDate: fuelIssues.issueDate,
       receivedSigned: fuelIssues.receivedSigned,
+      reviewStatus: fuelIssues.reviewStatus,
       cancelledAt: fuelIssues.cancelledAt,
       projectRef: projects.refCode,
       projectName: projects.name,
@@ -218,6 +220,7 @@ export async function listIssues(session: Session, f: IssueFilters): Promise<Iss
         f.from ? gte(fuelIssues.issueDate, f.from) : undefined,
         f.to ? lte(fuelIssues.issueDate, f.to) : undefined,
         f.unsigned ? and(eq(fuelIssues.receivedSigned, false), isNull(fuelIssues.cancelledAt)) : undefined,
+        f.review === "pending" ? and(eq(fuelIssues.reviewStatus, "pending_review"), isNull(fuelIssues.cancelledAt)) : undefined,
         f.status === "cancelled" ? isNotNull(fuelIssues.cancelledAt) : undefined,
         f.status === "active" ? isNull(fuelIssues.cancelledAt) : undefined,
         f.machine?.trim()
@@ -260,8 +263,9 @@ export async function listIssues(session: Session, f: IssueFilters): Promise<Iss
     if (h.cancelledAt) badges.push("cancelled");
     else {
       if (!h.receivedSigned) badges.push("unsigned");
+      if (h.reviewStatus === "pending_review") badges.push("pending_review");
       if (priced.length < ls.length) badges.push("pending_price");
-      if (h.cycleStatus === "closed" && h.receivedSigned && priced.length === ls.length) badges.push("invoiced"); // OBS-13: no price = cannot be billed
+      if (h.cycleStatus === "closed" && h.receivedSigned && h.reviewStatus === "checked" && priced.length === ls.length) badges.push("invoiced"); // OBS-13: no price = cannot be billed
     }
     return {
       id: h.id,
@@ -284,6 +288,8 @@ export type IssueDetail = {
   audit: { action: string; at: Date; userName: string | null; changes: unknown }[];
   /** label like "ก.ย. 2569" when the slip belongs to a closed cycle */
   closedCycleLabel: string | null;
+  /** when the photo of the signed paper was attached (ms), null = none; used to refresh the browser's cached picture */
+  photoAt: number | null;
 };
 
 export async function getIssue(session: Session, id: string): Promise<IssueDetail | null> {
@@ -321,11 +327,18 @@ export async function getIssue(session: Session, id: string): Promise<IssueDetai
     .where(eq(fuelIssueAudit.issueId, id))
     .orderBy(desc(fuelIssueAudit.at));
 
+  const [photo] = await db
+    .select({ at: schema.issueSignedPhotos.createdAt })
+    .from(schema.issueSignedPhotos)
+    .where(eq(schema.issueSignedPhotos.issueId, id))
+    .limit(1);
+
   return {
     head: { ...row.issue, projectRef: row.projectRef, projectName: row.projectName, recordedByName: row.recordedByName },
     lines,
     audit,
     closedCycleLabel: row.cycleStatus === "closed" ? thaiMonthShort(row.cycleStart!) : null,
+    photoAt: photo ? photo.at.getTime() : null,
   };
 }
 
@@ -364,7 +377,7 @@ export type ChangeResult = { ok: true } | { ok: false; message: string; check?: 
 type Head = typeof fuelIssues.$inferSelect;
 
 /** the slip, if this person may see it, with the reason it can't be changed (if any) */
-async function loadForChange(session: Session, id: string): Promise<{ head: Head; lock: string | null } | null> {
+export async function loadForChange(session: Session, id: string): Promise<{ head: Head; lock: string | null } | null> {
   const [row] = await db
     .select({ head: fuelIssues, cycleStatus: claimCycles.status, cycleStart: claimCycles.startDate })
     .from(fuelIssues)
@@ -524,18 +537,37 @@ export async function updateIssue(session: Session, id: string, input: IssueInpu
           updatedAt: new Date(),
         })
         .where(eq(fuelIssues.id, id));
+      // the meter photos of a phone slip hang on its lines: keep them by position across the delete/insert below
+      const keptPhotos = before.source === "mobile"
+        ? await tx
+            .select({ position: fuelIssueLines.position, mime: fuelIssueLinePhotos.mime, sha256: fuelIssueLinePhotos.sha256, takenAt: fuelIssueLinePhotos.takenAt, data: fuelIssueLinePhotos.data })
+            .from(fuelIssueLinePhotos)
+            .innerJoin(fuelIssueLines, eq(fuelIssueLines.id, fuelIssueLinePhotos.lineId))
+            .where(eq(fuelIssueLines.issueId, id))
+        : [];
       await tx.delete(fuelIssueLines).where(eq(fuelIssueLines.issueId, id));
-      await tx.insert(fuelIssueLines).values(
-        input.lines.map((l, i) => ({
-          issueId: id,
-          position: i + 1,
-          machineId: machineIds.get(machineKey(l.machine))!,
-          hourMeter: l.hourMeter,
-          liters: l.liters!,
-          pricePerLiter: price,
-          amount: price === null ? null : lineAmount(l.liters!, price),
-        })),
-      );
+      const newLines = await tx
+        .insert(fuelIssueLines)
+        .values(
+          input.lines.map((l, i) => ({
+            issueId: id,
+            position: i + 1,
+            machineId: machineIds.get(machineKey(l.machine))!,
+            hourMeter: l.hourMeter,
+            liters: l.liters!,
+            pricePerLiter: price,
+            amount: price === null ? null : lineAmount(l.liters!, price),
+          })),
+        )
+        .returning({ id: fuelIssueLines.id, position: fuelIssueLines.position });
+      for (const ph of keptPhotos) {
+        const line = newLines.find((n) => n.position === ph.position);
+        if (line) await tx.insert(fuelIssueLinePhotos).values({ lineId: line.id, mime: ph.mime, sha256: ph.sha256, takenAt: ph.takenAt, data: ph.data });
+      }
+      // R7: the office changed what the driver sent after the receiver had signed for it
+      if (before.source === "mobile" && before.receivedSigned && changes.lines) {
+        await tx.update(fuelIssues).set({ editedAfterSign: true }).where(eq(fuelIssues.id, id));
+      }
       await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "update", changes });
     });
     return { ok: true };
@@ -546,4 +578,43 @@ export async function updateIssue(session: Session, id: string, input: IssueInpu
     }
     throw e;
   }
+}
+
+// ───────────── photo of the signed paper ─────────────
+
+/** attach or replace the photo of the signed slip; same locks as any change (cancelled / closed cycle) */
+export async function saveSignedPhoto(session: Session, id: string, photo: SlipPhotoInput | null): Promise<ChangeResult> {
+  const cur = await loadForChange(session, id);
+  if (!cur) return NOT_FOUND;
+  if (cur.lock) return { ok: false, message: cur.lock };
+  const p = checkSlipPhoto(photo);
+  if (!p.ok) return { ok: false, message: p.error };
+  const table = schema.issueSignedPhotos;
+  await db.transaction(async (tx) => {
+    const [had] = await tx.select({ id: table.issueId }).from(table).where(eq(table.issueId, id)).limit(1);
+    await tx
+      .insert(table)
+      .values({ issueId: id, mime: p.mime, data: p.data, uploadedBy: session.userId })
+      .onConflictDoUpdate({ target: table.issueId, set: { mime: p.mime, data: p.data, uploadedBy: session.userId, createdAt: new Date() } });
+    await tx.insert(fuelIssueAudit).values({
+      issueId: id,
+      userId: session.userId,
+      action: "update",
+      changes: { photo: [had ? "มีรูป" : "ไม่มีรูป", had ? "เปลี่ยนรูปแล้ว" : "แนบรูปแล้ว"] },
+    });
+  });
+  return { ok: true };
+}
+
+export async function removeSignedPhoto(session: Session, id: string): Promise<ChangeResult> {
+  const cur = await loadForChange(session, id);
+  if (!cur) return NOT_FOUND;
+  if (cur.lock) return { ok: false, message: cur.lock };
+  const table = schema.issueSignedPhotos;
+  const gone = await db.transaction(async (tx) => {
+    const del = await tx.delete(table).where(eq(table.issueId, id)).returning({ id: table.issueId });
+    if (del.length) await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "update", changes: { photo: ["มีรูป", "ลบรูปแล้ว"] } });
+    return del.length > 0;
+  });
+  return gone ? { ok: true } : { ok: false, message: "ใบนี้ไม่มีรูปที่แนบไว้" };
 }

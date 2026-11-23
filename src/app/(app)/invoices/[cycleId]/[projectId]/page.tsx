@@ -8,6 +8,8 @@ import { cycleLabel, loadInvoice } from "@/server/cycles/cycle-service";
 import { InvoiceSheet } from "../../invoice-sheet";
 import { InvoicePanel } from "./invoice-panel";
 
+export const metadata = { title: "ใบแจ้งค่าใช้จ่ายโครงการ" };
+
 export default async function InvoicePage({ params }: { params: Promise<{ cycleId: string; projectId: string }> }) {
   const session = await requireUser();
   const { cycleId, projectId } = await params;

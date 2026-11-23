@@ -8,6 +8,7 @@ const all: Role[] = ["store_admin", "project_viewer", "executive", "system_admin
 export const NAV: NavItem[] = [
   { href: "/", label: "ภาพรวม", icon: "home", roles: all },
   { href: "/issues", label: "ใบจ่ายน้ำมัน", icon: "file", roles: all },
+  { href: "/routes", label: "เส้นทางรถเติมน้ำมัน", icon: "route", roles: ["store_admin", "executive", "system_admin"] },
   { href: "/purchases", label: "ซื้อน้ำมันเข้า", icon: "truck", roles: ["store_admin", "system_admin"] },
   { href: "/ledger", label: "สมุดคงเหลือ", icon: "book", roles: ["store_admin", "executive", "system_admin"] },
   { href: "/monthly", label: "ตารางรายเดือน", icon: "grid", roles: all },

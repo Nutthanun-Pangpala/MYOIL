@@ -4,6 +4,8 @@ import { requireWriter } from "@/lib/session";
 import { getIssueForEdit, machineOptions, projectOptions } from "@/server/issues/issue-service";
 import { IssueForm } from "../../new/issue-form";
 
+export const metadata = { title: "แก้ใบจ่าย" };
+
 export default async function EditIssuePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireWriter();
   const { id } = await params;

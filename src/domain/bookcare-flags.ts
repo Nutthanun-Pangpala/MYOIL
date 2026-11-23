@@ -1,0 +1,29 @@
+/** Thai wording for the flags of a phone slip (what the office reads while checking). Unknown codes are shown as they are. */
+export function flagLabel(code: string): string {
+  const [name, n] = code.split(":");
+  const line = n ? `บรรทัด ${n}: ` : "";
+  switch (name) {
+    case "late":
+      return "ส่งมาหลังรอบเคลมของวันที่ในใบปิดแล้ว จึงใส่ไว้ในรอบถัดไปที่เปิดอยู่";
+    case "over_balance":
+      return "ยอดคงเหลือในรถติดลบเมื่อรวมใบนี้ ตรวจว่าบันทึกซื้อน้ำมันเข้าครบหรือยัง";
+    case "new_machine":
+      return `${line}ชื่อเครื่องจักรที่ พขร. พิมพ์เอง ยังไม่อยู่ในทะเบียน`;
+    case "was_skipped":
+      return "จุดนี้ในเส้นทางถูกกดข้ามไปก่อน แล้ว พขร. กลับมาเติมทีหลัง";
+    case "high_liters":
+      return `${line}ลิตรสูงกว่าที่เคยเติมมาก พขร. กดยืนยันแล้ว`;
+    case "over_tank":
+      return "ลิตรรวมมากกว่าน้ำมันในรถ พขร. กดยืนยันแล้ว";
+    case "duplicate_machine":
+      return `${line}เครื่องจักรซ้ำกับอีกบรรทัดในใบเดียวกัน พขร. กดยืนยันแล้ว`;
+    case "price_far_from_daily":
+      return "ราคาต่อลิตรต่างจากราคาประจำวันเกิน 20%";
+    case "over_capacity":
+      return "ซื้อมากกว่าความจุถัง";
+    case "small_purchase":
+      return "ซื้อน้อยกว่า 100 ลิตร";
+    default:
+      return code;
+  }
+}

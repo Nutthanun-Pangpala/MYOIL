@@ -8,6 +8,7 @@ import { checkIssue, nextDocNo, type IssueCheck, type IssueInput } from "@/domai
 import { hasAtMostTwoDecimals, lineAmount, sumAmounts, sumLiters } from "@/domain/money";
 import { thaiShort } from "@/domain/thai-date";
 import { formatBaht, formatLiters } from "@/lib/format";
+import { shrinkImage } from "@/lib/image-shrink";
 import { previewIssueAction, saveIssueAction, updateIssueAction } from "../actions";
 
 type Project = { id: string; refCode: string; name: string };
@@ -52,6 +53,10 @@ export function IssueForm({
   );
   const [receivedSigned, setReceivedSigned] = useState(edit?.input.receivedSigned ?? false);
   const [receiverName, setReceiverName] = useState(edit?.input.receiverName ?? "");
+  // photo of the signed paper (new slips only; an existing slip gets it on its own page)
+  const [slipPhoto, setSlipPhoto] = useState<{ mime: string; base64: string } | null>(null);
+  const [slipPhotoName, setSlipPhotoName] = useState("");
+  const [slipPhotoError, setSlipPhotoError] = useState<string | null>(null);
 
   // typed text → project: exact "REF — name" from the list, or just the ref code
   const projectId = useMemo(() => {
@@ -142,9 +147,12 @@ export function IssueForm({
           else setSaveError(r.message);
           return;
         }
-        const res = await saveIssueAction(input);
+        const res = await saveIssueAction(input, slipPhoto);
         if (res.ok) {
-          if (mode === "next") {
+          if (res.photoError) {
+            // the slip is saved; only the picture failed → say so on the slip's page, where it can be attached again
+            router.push(`/issues/${res.id}?saved=1&photo=failed`);
+          } else if (mode === "next") {
             const q = new URLSearchParams({ saved: "1", date: issueDate, book: bookNo.trim(), doc: nextDocNo(docNo) });
             // full reload of the page state: an empty form, same date, next number
             window.location.assign(`/issues/new?${q}`);
@@ -373,6 +381,34 @@ export function IssueForm({
           />
           ใบกระดาษมีลายเซ็นแล้ว
         </label>
+        {!edit && (
+          <div className="flex flex-col gap-1 text-[14px] sm:col-span-2">
+            <label htmlFor="slip-photo">
+              รูปใบเซ็น <span className="text-muted">(ไม่บังคับ แนบทีหลังที่หน้าใบก็ได้)</span>
+            </label>
+            <input
+              id="slip-photo"
+              type="file"
+              accept="image/*"
+              className={`${field} py-2`}
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                setSlipPhotoError(null);
+                if (!f) return (setSlipPhoto(null), setSlipPhotoName(""));
+                const small = await shrinkImage(f);
+                if (!small) return (setSlipPhoto(null), setSlipPhotoName(""), setSlipPhotoError("เปิดรูปนี้ไม่ได้ เลือกไฟล์ JPG หรือ PNG"));
+                setSlipPhoto(small);
+                setSlipPhotoName(f.name);
+              }}
+            />
+            {slipPhotoName && <span className="text-[13px] text-muted">แนบแล้ว: {slipPhotoName}</span>}
+            {slipPhotoError && (
+              <span role="alert" className="text-[13px] text-repair">
+                {slipPhotoError}
+              </span>
+            )}
+          </div>
+        )}
         {check.warnings
           .filter((w) => w.kind === "unsigned")
           .map((w, k) => (

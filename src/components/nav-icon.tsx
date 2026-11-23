@@ -31,6 +31,13 @@ const SHAPES: Record<string, ReactNode> = {
       <path d="M5 17a3 3 0 0 1 3-3h11" />
     </>
   ),
+  route: (
+    <>
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5" />
+    </>
+  ),
   grid: (
     <>
       <rect x="3" y="5" width="18" height="16" rx="2" />
