@@ -47,7 +47,12 @@ export async function recordPurchase(page: Page, p: { date: string; liters: stri
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill(p.price);
   if (p.billNo) await form.getByLabel(/เลขที่บิล/).fill(p.billNo);
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`/purchases\\?month=${p.date.slice(0, 7)}$`));
+  // a bill that prices or reprices open slips says so and waits for "รับทราบ"; otherwise the form closes by itself
+  const month = new RegExp(`/purchases\\?month=${p.date.slice(0, 7)}$`);
+  const note = form.getByRole("status");
+  await expect(async () => expect((await note.count()) > 0 || month.test(page.url())).toBe(true)).toPass();
+  if (!month.test(page.url())) await form.getByRole("button", { name: "รับทราบ" }).click();
+  await expect(page).toHaveURL(month);
 }
 
 /** plan route stops for a day straight in the local DB (scripts/e2e-plan-route.ts); returns their ids in order */
@@ -58,3 +63,16 @@ export function planStops(date: string, codes: string[]): string[] {
 
 /** one fresh stop: every phone slip needs its own stop of the route (contract §9.1, 1 stop = 1 slip) */
 export const planStop = (date: string, code: string) => planStops(date, [code])[0];
+
+/** press digits on the driver login's big keypad (phone, then PIN: no keyboard, no login button) */
+export async function pressDigits(page: Page, digits: string) {
+  for (const d of digits) await page.getByRole("button", { name: d, exact: true }).click();
+}
+
+/** the driver's login: 10 digits of the phone, 6 of the PIN, and the 6th one logs in by itself */
+export async function loginDriver(page: Page, phone = "0810000001", pin = "246810") {
+  await page.goto("/login/driver");
+  await pressDigits(page, phone);
+  await pressDigits(page, pin);
+  await expect(page).toHaveURL("/driver");
+}

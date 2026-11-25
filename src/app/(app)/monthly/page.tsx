@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { Fragment } from "react";
-import { Card, linkButton } from "@/components/ui";
+import { Card, StateBox, linkButton } from "@/components/ui";
 import { isMonth } from "@/domain/iso-date";
 import { formatBaht } from "@/lib/format";
 import { requireUser } from "@/lib/session";
 import { loadMonthly } from "@/server/monthly/monthly-service";
+import { cycleLabel, listCycles, loadCycleView } from "@/server/cycles/cycle-service";
+import { formatLiters } from "@/lib/format";
 import { MonthlyFilters } from "./monthly-filters";
 
 export const metadata = { title: "ตารางรายเดือน" };
@@ -22,6 +24,22 @@ export default async function MonthlyPage({ searchParams }: { searchParams: SP }
   const days = Array.from({ length: (v.all ?? v.one)!.days }, (_, i) => i + 1);
   const firstProject = v.projects[0]?.id;
   const exportQs = `month=${month}${v.projectId ? `&project=${v.projectId}` : ""}`;
+
+  // design: one line that says how this table and the invoices of the same cycle add up, and why they may differ
+  const monthStart = `${month}-01`;
+  const cycle = (await listCycles()).find((c) => c.start <= monthStart && monthStart <= c.end) ?? null;
+  const cv = cycle ? await loadCycleView(session, cycle.id) : null;
+  const tableLiters = (v.all ?? v.one)!.grandTotal;
+  const picked = v.projectId ? v.projects.find((p) => p.id === v.projectId) : undefined;
+  const invRow = v.projectId ? cv?.rows.find((r) => r.projectId === v.projectId) : undefined;
+  const invLiters = v.projectId ? (invRow?.liters ?? 0) : (cv?.totals.liters ?? 0);
+  const why: string[] = [];
+  if (cv) {
+    const unsigned = v.projectId ? (invRow?.unsignedSlips ?? 0) : cv.unsigned.slips;
+    if (unsigned > 0) why.push(`ใบที่ยังไม่เซ็นรับ ${unsigned} ใบยังไม่นับเข้าใบแจ้ง`);
+    if (!v.projectId && cv.waitingCheck.slips > 0) why.push(`ใบจากมือถือที่ยังไม่ได้ตรวจ ${cv.waitingCheck.slips} ใบยังไม่นับเข้าใบแจ้ง`);
+    if (why.length === 0 && tableLiters !== invLiters) why.push("มีใบที่ถูกยกไปนับในรอบอื่น");
+  }
 
   const tab = (active: boolean) =>
     `inline-flex min-h-[42px] items-center px-4 font-display text-[15px] ${active ? "bg-earth text-white" : "bg-card text-ink"}`;
@@ -47,7 +65,7 @@ export default async function MonthlyPage({ searchParams }: { searchParams: SP }
     <>
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-1">
-          <h1 className="font-display text-[34px] font-semibold leading-snug">ตารางรายเดือน</h1>
+          <h1 className="font-display text-[34px] font-semibold leading-[1.3]">ตารางรายเดือน</h1>
           <p className="text-muted">
             สรุปปริมาณน้ำมันเติมเครื่องจักรประจำเดือน{v.projectId ? " ของหนึ่งโครงการ" : ""} หน่วยเป็นลิตร
           </p>
@@ -72,7 +90,7 @@ export default async function MonthlyPage({ searchParams }: { searchParams: SP }
 
       <Card className="p-4">
         {(v.all ?? v.one)!.rows.length === 0 ? (
-          <p className="py-8 text-center text-muted">ยังไม่มีการจ่ายน้ำมันในเดือนนี้</p>
+          <StateBox title="ยังไม่มีการจ่ายน้ำมันในเดือนนี้">เลือกเดือนอื่นด้านบน</StateBox>
         ) : (
           <div className="overflow-x-auto">
             <table className="m">
@@ -137,8 +155,31 @@ export default async function MonthlyPage({ searchParams }: { searchParams: SP }
         )}
       </Card>
 
+      {cv && cycle && tableLiters > 0 && (
+        <div className="rounded-control border border-line bg-card px-[18px] py-3.5">
+          {v.projectId ? (
+            <>
+              {picked?.code} รอบ {cycleLabel(cycle)} มีใบจ่ายรวม <strong>{formatLiters(tableLiters)} ลิตร</strong>
+              {tableLiters === invLiters ? " ตรงกับใบแจ้งค่าใช้จ่าย" : ` ส่วนใบแจ้งค่าใช้จ่ายรวม ${formatLiters(invLiters)} ลิตร ต่างกัน ${formatLiters(Math.abs(tableLiters - invLiters))} ลิตร เพราะ${why.join(" และ")}`}{" "}
+              <Link href={`/invoices/${cycle.id}/${v.projectId}`} className="text-earth underline hover:text-ink">
+                เปิดใบแจ้งของ {picked?.code}
+              </Link>
+            </>
+          ) : (
+            <>
+              ตารางนี้นับทุกใบที่จ่ายน้ำมันจริง รวม <strong>{formatLiters(tableLiters)} ลิตร</strong> ส่วนใบแจ้งค่าใช้จ่ายของรอบเดียวกันรวม <strong>{formatLiters(invLiters)} ลิตร</strong>
+              {tableLiters === invLiters ? " ตรงกัน" : ` ต่างกัน ${formatLiters(Math.abs(tableLiters - invLiters))} ลิตร เพราะ${why.join(" และ")}`}{" "}
+              <Link href={`/invoices?cycle=${cycle.id}`} className="text-earth underline hover:text-ink">
+                ดูใบแจ้งค่าใช้จ่ายของรอบนี้
+              </Link>
+            </>
+          )}
+        </div>
+      )}
       <p className="text-sm text-muted">
-        ตารางนี้นับทุกใบที่จ่ายน้ำมันจริง ยกเว้นใบที่ยกเลิก คอลัมน์ชื่อและคอลัมน์รวมตรึงอยู่กับที่ขณะเลื่อนซ้ายขวา กดตัวเลขในช่องเพื่อดูใบจ่ายของโครงการและวันนั้น
+        {v.projectId
+          ? "แถวคือเครื่องจักรของโครงการ เครื่องเช่าไม่มีรหัสทรัพย์สิน กดตัวเลขในช่องเพื่อดูใบจ่ายของวันนั้น"
+          : "คอลัมน์โครงการและคอลัมน์รวมตรึงอยู่กับที่ขณะเลื่อนซ้ายขวา กดตัวเลขในช่องเพื่อดูใบจ่ายของโครงการและวันนั้น"}
       </p>
     </>
   );

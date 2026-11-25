@@ -42,7 +42,7 @@ describe("completePurchase", () => {
 
 describe("completePurchase: at most 2 decimals", () => {
   it("refuses liters with a third decimal, naming the field", () => {
-    expect(completePurchase({ liters: 10.555, price: 32.5, amount: null })).toEqual({ ok: false, error: "ใส่ได้ไม่เกิน 2 ตำแหน่ง ตรวจกับใบอีกครั้ง", field: "liters" });
+    expect(completePurchase({ liters: 10.555, price: 32.5, amount: null })).toEqual({ ok: false, error: "ลิตร ใส่ได้ไม่เกิน 2 ตำแหน่ง ตรวจกับใบอีกครั้ง", field: "liters" });
   });
   it("refuses a price with a third decimal", () => {
     const r = completePurchase({ liters: 100, price: 33.555, amount: null });

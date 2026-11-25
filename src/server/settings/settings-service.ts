@@ -1,11 +1,11 @@
-import { and, asc, count, desc, eq, ilike, isNull, lt, lte, max, ne, or, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { machineKey } from "@/domain/issue-check";
 import { validateCycleDates, validateMachine, validateTank, validateUser, type TankErrors, type UserErrors } from "@/domain/settings-rules";
-import { nextCycleAfter } from "@/domain/cycle";
+import { cycleRanges, dayAfter, isCutDay } from "@/domain/cycle";
 import type { Session } from "@/lib/session";
 import { hashSecret } from "@/lib/password";
-import { cycleIdFor } from "../cycles/cycle-service";
+import { cutDay, cycleIdFor } from "../cycles/cycle-service";
 
 const { projects, machines, users, userProjects, appSettings, claimCycles, fuelIssues } = schema;
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
@@ -70,8 +70,9 @@ export async function saveMachine(id: string | null, m: MachineInput): Promise<R
 
 // ───────────── users ─────────────
 
+/** office accounts only: drivers (phone + PIN) are not edited on this tab yet */
 export async function listUsers() {
-  const us = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, active: users.active }).from(users).orderBy(desc(users.active), asc(users.name));
+  const us = await db.select({ id: users.id, name: users.name, email: users.email, role: users.role, active: users.active }).from(users).where(ne(users.role, "driver")).orderBy(desc(users.active), asc(users.name));
   const ups = await db.select({ userId: userProjects.userId, ref: projects.refCode, projectId: projects.id }).from(userProjects).innerJoin(projects, eq(userProjects.projectId, projects.id)).orderBy(asc(projects.refCode));
   return us.map((u) => ({ ...u, projects: ups.filter((p) => p.userId === u.id).map((p) => ({ id: p.projectId, ref: p.ref })) }));
 }
@@ -161,9 +162,57 @@ export async function listCyclesForSettings() {
   const cur = await cycleIdFor(db, today());
   // the next cycle is made by the system, so it is already on the list
   const [here] = await db.select().from(claimCycles).where(eq(claimCycles.id, cur)).limit(1);
-  await cycleIdFor(db, nextCycleAfter(here.endDate).start);
+  await cycleIdFor(db, dayAfter(here.endDate));
   const rows = await db.select().from(claimCycles).orderBy(desc(claimCycles.startDate));
   return rows.map((c) => ({ id: c.id, start: c.startDate, end: c.endDate, status: c.status, isCurrent: c.startDate <= today() && today() <= c.endDate, future: c.startDate > today() }));
+}
+
+export const loadCutDay = () => cutDay();
+
+/**
+ * Set the day of the month every cycle is cut on (1–28, null = end of the calendar month) — owner, 25 Nov 2026.
+ * Cycles that are still open are laid out again from the first open one with the new cut day, and their slips go
+ * to the cycle of their own date; closed cycles are never touched. A slip carried over from a closed cycle
+ * (dated before the first open one) stays in the first open cycle.
+ */
+export async function saveCutDay(day: number | null): Promise<Result> {
+  if (day !== null && !isCutDay(day)) return { ok: false, message: "เลือกวันตัดรอบเป็นวันที่ 1–28 หรือสิ้นเดือน" };
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(884204)`);
+    await tx.insert(appSettings).values({ id: 1, cycleCutDay: day }).onConflictDoUpdate({ target: appSettings.id, set: { cycleCutDay: day } });
+    const open = await tx.select().from(claimCycles).where(eq(claimCycles.status, "open")).orderBy(asc(claimCycles.startDate));
+    if (open.length === 0) return { ok: true as const, message: "บันทึกวันตัดรอบแล้ว ใช้กับรอบที่สร้างต่อจากนี้" };
+    const anchor = open[0].startDate;
+    const [closedLater] = await tx.select({ id: claimCycles.id }).from(claimCycles).where(and(eq(claimCycles.status, "closed"), gt(claimCycles.startDate, anchor))).limit(1);
+    if (closedLater) return { ok: false as const, message: "มีรอบที่ปิดแล้วอยู่หลังรอบที่ยังเปิด เปลี่ยนวันตัดรอบไม่ได้ ปิดรอบที่ค้างให้เรียงตามลำดับก่อน" };
+
+    const last = open[open.length - 1].endDate;
+    const ranges = cycleRanges(anchor, day, open.length, last > today() ? last : today());
+    // out of the way first: start dates are unique, and the new ones may be dates other rows still hold
+    for (let i = 0; i < open.length; i++) {
+      const parked = `29${String(i).padStart(2, "0")}-01-01`;
+      await tx.update(claimCycles).set({ startDate: parked, endDate: parked }).where(eq(claimCycles.id, open[i].id));
+    }
+    const ids: string[] = [];
+    for (let i = 0; i < ranges.length; i++) {
+      if (i < open.length) {
+        await tx.update(claimCycles).set({ startDate: ranges[i].start, endDate: ranges[i].end }).where(eq(claimCycles.id, open[i].id));
+        ids.push(open[i].id);
+      } else {
+        const [row] = await tx.insert(claimCycles).values({ startDate: ranges[i].start, endDate: ranges[i].end }).returning({ id: claimCycles.id });
+        ids.push(row.id);
+      }
+    }
+    // every slip of an open cycle follows its own date
+    const openIds = open.map((c) => c.id);
+    for (let i = 0; i < ranges.length; i++) {
+      await tx
+        .update(fuelIssues)
+        .set({ claimCycleId: ids[i] })
+        .where(and(inArray(fuelIssues.claimCycleId, openIds), gte(fuelIssues.issueDate, ranges[i].start), lte(fuelIssues.issueDate, ranges[i].end)));
+    }
+    return { ok: true as const, message: "บันทึกวันตัดรอบแล้ว จัดรอบที่ยังไม่ปิดใหม่ตามวันตัดรอบ" };
+  });
 }
 
 /** change the end (and the start when there is no earlier cycle) of an open cycle; the next cycle's start follows */
@@ -204,11 +253,4 @@ export async function updateCycleDates(id: string, start: string, end: string): 
     }
     return { ok: true as const, message: "บันทึกวันที่ของรอบแล้ว" };
   });
-}
-
-// ───────────── project sync (from BookCare) ─────────────
-
-export async function lastProjectSync(): Promise<Date | null> {
-  const [r] = await db.select({ at: max(projects.syncedAt) }).from(projects);
-  return r?.at ?? null;
 }

@@ -14,11 +14,17 @@ const TABS = [
 export function SettingsTabs() {
   const path = usePathname();
   return (
-    <nav aria-label="หมวดตั้งค่า" className="flex flex-wrap gap-2">
+    // design 6.11: words on a line, the open one underlined in earth brown
+    <nav aria-label="หมวดตั้งค่า" className="flex flex-wrap gap-x-7 border-b border-line">
       {TABS.map((t) => {
         const on = path.startsWith(t.href);
         return (
-          <Link key={t.href} href={t.href} aria-current={on ? "page" : undefined} className={`inline-flex min-h-11 items-center rounded-control border px-4 font-display ${on ? "border-earth bg-earth text-white" : "border-idle bg-card"}`}>
+          <Link
+            key={t.href}
+            href={t.href}
+            aria-current={on ? "page" : undefined}
+            className={`-mb-px inline-flex min-h-11 items-center border-b-[3px] px-1 font-display text-[17px] no-underline ${on ? "border-earth text-ink" : "border-transparent text-muted hover:text-ink"}`}
+          >
             {t.label}
           </Link>
         );

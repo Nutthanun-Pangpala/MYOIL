@@ -14,8 +14,9 @@ export type StockNow = { liters: number; percent: number | null };
  * ≥1024px full menu · 768–1023px icon rail · <768px top bar with a slide-down menu (no JS: <details>).
  * Look = design 6.x side menu: brand, order search, menu, "ในรถตอนนี้", user card.
  */
-export function Sidebar({ name, role, stock }: { name: string; role: Role; stock: StockNow | null }) {
+export function Sidebar({ name, role, stock, pendingCheck = 0 }: { name: string; role: Role; stock: StockNow | null; pendingCheck?: number }) {
   const items = navFor(role);
+  const badges = { "/check": { count: pendingCheck, label: "ใบรอตรวจ" } };
 
   const brand = (
     <div className="flex flex-col gap-1 px-3.5">
@@ -35,7 +36,7 @@ export function Sidebar({ name, role, stock }: { name: string; role: Role; stock
   );
 
   const stockCard = stock && (
-    <Link href="/ledger" className="flex flex-col gap-1.5 rounded-[14px] bg-black/20 px-3.5 pb-4 pt-3.5 text-white no-underline">
+    <Link href="/ledger" className="flex flex-col gap-1.5 rounded-[14px] bg-black/20 px-3.5 pb-4 pt-3.5 text-white no-underline hover:bg-black/30">
       <span className="text-[13px] text-sidebar-sub">ในรถตอนนี้</span>
       <span className="num text-left font-display text-[22px] font-medium leading-tight">
         {formatLiters(stock.liters)} <span className="text-sm font-normal">ลิตร</span>
@@ -77,10 +78,10 @@ export function Sidebar({ name, role, stock }: { name: string; role: Role; stock
           {search}
         </div>
         <nav aria-label="เมนูหลัก" className="flex flex-col gap-1 lg:hidden">
-          <NavLinks items={items} showLabel={false} />
+          <NavLinks items={items} showLabel={false} badges={badges} />
         </nav>
         <nav aria-label="เมนูหลัก" className="hidden flex-col gap-1 lg:flex">
-          <NavLinks items={items} showLabel />
+          <NavLinks items={items} showLabel badges={badges} />
         </nav>
         <div className="mt-auto hidden flex-col gap-3 lg:flex">
           {stockCard}
@@ -98,7 +99,7 @@ export function Sidebar({ name, role, stock }: { name: string; role: Role; stock
           <div className="mt-3 flex flex-col gap-4">
             {search}
             <nav aria-label="เมนูหลัก" className="flex flex-col gap-1">
-              <NavLinks items={items} showLabel />
+              <NavLinks items={items} showLabel badges={badges} />
             </nav>
             {stockCard}
             {who}

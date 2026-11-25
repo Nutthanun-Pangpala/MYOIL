@@ -1,10 +1,10 @@
-import Link from "next/link";
+import { Alert, PageHeader } from "@/components/ui";
 import { notFound, redirect } from "next/navigation";
 import { requireWriter } from "@/lib/session";
 import { getIssueForEdit, machineOptions, projectOptions } from "@/server/issues/issue-service";
 import { IssueForm } from "../../new/issue-form";
 
-export const metadata = { title: "แก้ใบจ่าย" };
+export const metadata = { title: "แก้ไขใบจ่าย" };
 
 export default async function EditIssuePage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireWriter();
@@ -15,15 +15,10 @@ export default async function EditIssuePage({ params }: { params: Promise<{ id: 
 
   if (cur.lock) {
     return (
-      <div className="flex max-w-3xl flex-col gap-4">
-        <h1 className="font-display text-2xl text-earth">แก้ไขใบจ่าย</h1>
-        <p role="alert" className="rounded-control bg-repair-soft px-3 py-2 text-[14px] text-repair">
-          {cur.lock}
-        </p>
-        <Link href={`/issues/${id}`} className="text-[14px] text-earth underline">
-          กลับไปดูใบ
-        </Link>
-      </div>
+      <>
+        <PageHeader title={`แก้ไขใบจ่าย เล่มที่ ${cur.input.bookNo} เลขที่ ${cur.input.docNo}`} back={{ href: `/issues/${id}`, label: "กลับไปดูใบจ่ายนี้" }} />
+        <Alert className="max-w-3xl">{cur.lock}</Alert>
+      </>
     );
   }
   if (!cur.input.projectId) redirect(`/issues/${id}`);
@@ -37,8 +32,8 @@ export default async function EditIssuePage({ params }: { params: Promise<{ id: 
       projects={projects}
       machines={machines.map((m) => m.code)}
       initial={{ issueDate: cur.input.issueDate, bookNo: cur.input.bookNo, docNo: cur.input.docNo }}
-      justSaved={false}
-      edit={{ id, input: cur.input, projectText }}
+      saved={null}
+      edit={{ id, input: cur.input, projectText, savedAt: cur.savedAt }}
     />
   );
 }

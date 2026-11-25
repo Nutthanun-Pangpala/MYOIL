@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Button, Card, Pill } from "@/components/ui";
+import { Button, Card, Pill, fieldClass } from "@/components/ui";
 import { flagLabel } from "@/domain/bookcare-flags";
 import { acceptMachineAction, markCheckedAction, mergeMachineAction } from "../review-actions";
 
@@ -52,31 +52,33 @@ export function ReviewCard(p: ReviewCardProps) {
   return (
     <Card className="flex flex-col gap-4 p-5">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="font-display text-lg text-earth">ตรวจใบจากมือถือ</h2>
+        <h2 className="font-display text-xl font-medium leading-[1.4]">ตรวจใบจากมือถือ</h2>
         {p.status === "pending_review" ? <Pill tone="wait">รอตรวจ</Pill> : <Pill tone="ok">ตรวจแล้ว</Pill>}
         {p.editedAfterSign && <Pill tone="wait">แก้หลังเซ็นรับ</Pill>}
       </div>
-      <p className="text-[14px] text-muted">
+      <p className="text-sm text-muted">
         พขร. {p.driverName ?? "-"} · บันทึกที่หน้างาน {when(p.recordedAt)} · ถึง MYOIL {when(p.receivedAt)}
         {p.unsignedReason ? ` · ไม่มีผู้เซ็นรับ: ${p.unsignedReason}` : ""}
       </p>
 
       {flags.length > 0 && (
-        <ul className="flex flex-col gap-1 rounded-control bg-safety-soft px-3 py-2 text-[14px]">
+        <ul aria-label="สิ่งที่ระบบจับได้" className="flex flex-wrap gap-1.5">
           {flags.map((f) => (
-            <li key={f}>⚠ {flagLabel(f)}</li>
+            <li key={f}>
+              <Pill tone="bad">{flagLabel(f)}</Pill>
+            </li>
           ))}
         </ul>
       )}
 
-      <p className="text-[14px]">เทียบรูปมิเตอร์กับจำนวนลิตรของแต่ละบรรทัด แล้วกด “ตรวจแล้ว” ใบจากมือถือจะเข้าใบแจ้งค่าใช้จ่ายได้หลังตรวจเท่านั้น</p>
-      <ul className="grid gap-3 sm:grid-cols-2">
+      <p className="text-sm">เทียบรูปมิเตอร์กับจำนวนลิตรของแต่ละบรรทัด แล้วกด “ตรวจแล้ว” ใบจากมือถือจะเข้าใบแจ้งค่าใช้จ่ายได้หลังตรวจเท่านั้น</p>
+      <ul className="grid gap-3">
         {p.lines.map((l) => (
           <li key={l.lineId} className="flex flex-col gap-2 rounded-control border border-line p-3">
             <div className="font-medium">
               บรรทัด {l.position}: {l.machine} {l.machinePending && <Pill tone="wait">ชื่อรอตรวจ</Pill>}
             </div>
-            <div className="num text-[14px]">
+            <div className="num text-left text-sm">
               {l.liters} ลิตร{l.hourMeter ? ` · ชั่วโมง/ไมล์ ${l.hourMeter}` : ""}
             </div>
             {l.hasPhoto ? (
@@ -85,7 +87,7 @@ export function ReviewCard(p: ReviewCardProps) {
                 <img src={`/api/issue-line-photo/${l.lineId}`} alt={`รูปมิเตอร์ บรรทัด ${l.position}`} className="max-h-64 w-full rounded-control object-contain bg-page" />
               </a>
             ) : (
-              <p className="text-[14px] text-muted">ไม่มีรูปมิเตอร์</p>
+              <p className="text-sm text-muted">ไม่มีรูปมิเตอร์</p>
             )}
           </li>
         ))}
@@ -102,7 +104,7 @@ export function ReviewCard(p: ReviewCardProps) {
               </div>
               <label className="flex flex-col gap-1 text-[13px] text-muted">
                 รวมกับเครื่องเดิม
-                <select value={into[l.machineId] ?? ""} onChange={(e) => setInto({ ...into, [l.machineId]: e.target.value })} className="min-h-11 rounded-control border border-line bg-card px-3 text-[14px] text-ink">
+                <select value={into[l.machineId] ?? ""} onChange={(e) => setInto({ ...into, [l.machineId]: e.target.value })} className={fieldClass}>
                   <option value="">เลือกเครื่องเดิม…</option>
                   {p.knownMachines.map((m) => (
                     <option key={m.id} value={m.id}>
@@ -127,13 +129,13 @@ export function ReviewCard(p: ReviewCardProps) {
           <Button type="button" variant="primary" disabled={busy || !!p.lock || held.length > 0} onClick={() => run(() => markCheckedAction(p.id))}>
             ตรวจแล้ว
           </Button>
-          {held.length > 0 && <span className="text-[14px] text-muted">จัดการชื่อเครื่องจักรด้านบนก่อน</span>}
-          {p.lock && <span className="text-[14px] text-muted">{p.lock}</span>}
+          {held.length > 0 && <span className="text-sm text-muted">จัดการชื่อเครื่องจักรด้านบนก่อน</span>}
+          {p.lock && <span className="text-sm text-muted">{p.lock}</span>}
         </div>
       )}
-      {p.status === "checked" && <p className="text-[14px] text-muted">ตรวจโดย {p.reviewedBy ?? "-"} · {when(p.reviewedAt)}</p>}
+      {p.status === "checked" && <p className="text-sm text-muted">ตรวจโดย {p.reviewedBy ?? "-"} · {when(p.reviewedAt)}</p>}
       {msg && (
-        <p role="alert" className="rounded-control bg-repair-soft px-3 py-2 text-[14px] text-repair">
+        <p role="alert" className="rounded-control bg-repair-soft px-3 py-2 text-sm text-repair-ink">
           {msg}
         </p>
       )}

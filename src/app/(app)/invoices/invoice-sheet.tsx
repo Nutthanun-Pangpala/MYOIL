@@ -4,12 +4,16 @@ import { formatBaht, formatLiters } from "@/lib/format";
 import type { InvoiceDetail } from "@/server/cycles/cycle-service";
 
 /** the printed form: A4 portrait, black and white. Layout follows design 6.10. */
+const DOTS = "วันที่ ......................";
+
 export function InvoiceSheet({ inv, links = true }: { inv: InvoiceDetail; links?: boolean }) {
+  const closedAt = inv.cycle.status === "closed" ? inv.cycle.closedAt : null;
+  const issued = closedAt ? { by: inv.cycle.closedByName ?? "", on: thaiShort(closedAt.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" })) } : null;
   const sign = (label: string[]) => (
     <div className="flex flex-col gap-0.5 text-center text-[12px]">
       <div className="h-11 border-b border-ink" />
-      {label.map((l) => (
-        <span key={l}>{l}</span>
+      {label.map((l, i) => (
+        <span key={i}>{l}</span>
       ))}
     </div>
   );
@@ -19,7 +23,8 @@ export function InvoiceSheet({ inv, links = true }: { inv: InvoiceDetail; links?
       <div className="text-center">สโตร์กลาง U WORK 999</div>
       <div className="flex flex-wrap justify-between gap-x-6 gap-y-1">
         <span>
-          ผู้ใช้บริการ {inv.project.ref} ({inv.project.name})
+          ผู้ใช้บริการ {inv.project.ref}
+          {inv.project.code ? ` ${inv.project.code}` : ""} ({inv.project.name})
         </span>
         <span>เดือน{thaiMonth(inv.cycle.start)}</span>
       </div>
@@ -75,9 +80,10 @@ export function InvoiceSheet({ inv, links = true }: { inv: InvoiceDetail; links?
           {sign(["(ADMIN หน่วยงาน)", "ผู้ตรวจสอบ"])}
           {sign(["ผู้จัดการโครงการ PM"])}
         </div>
+        {/* design 6.10: the one who issued it (closed the cycle) and when; the yard's manager signs and dates by hand */}
         <div className="grid grid-cols-2 gap-6 px-[15%]">
-          {sign(["ผู้จัดทำ"])}
-          {sign(["ผู้จัดการโครงการ"])}
+          {sign(issued ? [issued.by, `วันที่ ${issued.on}`, "ผู้จัดทำ"] : [DOTS, "ผู้จัดทำ"])}
+          {sign([DOTS, "ผู้จัดการโครงการ"])}
         </div>
       </div>
     </div>

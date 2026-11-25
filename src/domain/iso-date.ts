@@ -17,6 +17,12 @@ export function monthRange(month: string): { start: string; end: string } {
   return { start: `${y}-${mm}-01`, end: `${y}-${mm}-${String(last).padStart(2, "0")}` };
 }
 
+/** the days of `month` up to and including `today`: all of a past month, this month so far (a month not begun: end < start) */
+export function monthUpTo(month: string, today: string): { start: string; end: string } {
+  const { start, end } = monthRange(month);
+  return { start, end: today < end ? today : end };
+}
+
 /** the month `n` months before/after `month` (`YYYY-MM`) */
 export function shiftMonth(month: string, n: number): string {
   const [y, m] = month.split("-").map(Number);

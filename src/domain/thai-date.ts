@@ -48,3 +48,12 @@ export function thaiMonthShort(iso: string): string {
   const { y, m } = parts(iso);
   return `${MONTHS[m - 1]} ${y + 543}`;
 }
+
+/** a span of days the short way: 1–30 พ.ย. 2569 · 28 ต.ค.–3 พ.ย. 2569 · 28 ธ.ค. 2569–3 ม.ค. 2570 */
+export function thaiRange(from: string, to: string): string {
+  const a = parts(from);
+  const b = parts(to);
+  if (a.y === b.y && a.m === b.m) return `${a.d}–${b.d} ${MONTHS[b.m - 1]} ${b.y + 543}`;
+  if (a.y === b.y) return `${a.d} ${MONTHS[a.m - 1]}–${b.d} ${MONTHS[b.m - 1]} ${b.y + 543}`;
+  return `${a.d} ${MONTHS[a.m - 1]} ${a.y + 543}–${b.d} ${MONTHS[b.m - 1]} ${b.y + 543}`;
+}

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { MonthSelect } from "@/components/month-select";
-import { Card, linkButton } from "@/components/ui";
+import { Card, StateBox, linkButton } from "@/components/ui";
 import { isMonth } from "@/domain/iso-date";
 import { thaiLong } from "@/domain/thai-date";
 import { formatBaht } from "@/lib/format";
@@ -70,7 +70,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: SP })
 
       <Card className="p-6">
         {rows.length === 0 ? (
-          <p className="py-8 text-center text-muted">ยังไม่มีข้อมูลของเดือนนี้</p>
+          <StateBox title="ยังไม่มีข้อมูลของเดือนนี้">สมุดเริ่มนับจากวันเริ่มใช้ที่ตั้งไว้ในหน้าตั้งค่า รถเติมน้ำมัน</StateBox>
         ) : (
           <div className="overflow-x-auto">
             <table className="t">

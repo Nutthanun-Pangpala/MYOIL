@@ -78,6 +78,14 @@ export async function requireUser(): Promise<Session> {
   return s;
 }
 
+/** the fuel-truck driver's screens (/driver). Office people are sent to their own home */
+export async function requireDriver(): Promise<Session> {
+  const s = await getSession();
+  if (!s) redirect("/login/driver");
+  if (s.role !== "driver") redirect("/");
+  return s;
+}
+
 /** may key / change fuel records */
 export async function requireWriter(): Promise<Session> {
   const s = await requireUser();

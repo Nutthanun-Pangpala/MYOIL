@@ -30,8 +30,9 @@ const stamp = (name: string) => timestamp(name, { withTimezone: true }).defaultN
 
 // ───────────── people ─────────────
 
-/** brief §3: 4 groups. system_admin can do everything store_admin can. */
-export const roleEnum = pgEnum("role", ["store_admin", "project_viewer", "executive", "system_admin"]);
+/** brief §3: 4 office groups. system_admin can do everything store_admin can.
+ *  `driver` (owner, 25 Nov 2026) = the fuel-truck driver: phone + PIN, only the /driver screens. */
+export const roleEnum = pgEnum("role", ["store_admin", "project_viewer", "executive", "system_admin", "driver"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -41,6 +42,11 @@ export const users = pgTable("users", {
   role: roleEnum("role").notNull(),
   active: boolean("active").notNull().default(true),
   createdAt: stamp("created_at"),
+  // drivers sign in with phone + 6-digit PIN (hash in password_hash; email is "<phone>@driver.invalid")
+  phone: text("phone").unique(),
+  // a 6-digit PIN can be guessed, so wrong tries are counted and the account rests for a while
+  failedLogins: integer("failed_logins").notNull().default(0),
+  lockedUntil: timestamp("locked_until", { withTimezone: true }),
 });
 
 // ───────────── projects (owned by BookCare — MYOIL only reads) ─────────────
@@ -170,6 +176,8 @@ export const appSettings = pgTable("app_settings", {
   lowLevelLiters: liters("low_level_liters"),
   openingLiters: liters("opening_liters").notNull().default(0), // book balance before the first record
   openingDate: date("opening_date", { mode: "string" }),
+  /** day of the month a claim cycle is cut on (1–28); null = the last day of the calendar month */
+  cycleCutDay: integer("cycle_cut_day"),
 });
 
 // ───────────── claim cycles & invoices ─────────────
@@ -289,6 +297,8 @@ export const fuelIssues = pgTable(
     editedAfterSign: boolean("edited_after_sign").notNull().default(false), // R7
     /** the stop of the day's route this phone slip fills (contract §9.1); paper slips have none */
     routeStopId: uuid("route_stop_id"),
+    /** the purchase bill this slip takes its price from (latest bill on or before its date); null = รอราคา */
+    pricePurchaseId: uuid("price_purchase_id").references(() => fuelPurchases.id, { onDelete: "set null" }),
     createdAt: stamp("created_at"),
     updatedAt: stamp("updated_at"),
   },

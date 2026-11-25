@@ -7,7 +7,7 @@ import { db, schema } from "@/db";
 import { canChangeStop, checkStopForIssue, moveStop, renumber, stopStatus, type StopStatus } from "@/domain/route";
 import type { SkipRequest } from "@/domain/bookcare-api";
 
-const { fuelRoutes, fuelRouteStops, fuelIssues, projects } = schema;
+const { fuelRoutes, fuelRouteStops, fuelIssues, fuelIssueLines, projects } = schema;
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type Db = Tx | typeof db;
 
@@ -69,6 +69,17 @@ export async function routeForDate(date: string, q: Db = db): Promise<RouteView>
       };
     }),
   };
+}
+
+/** liters of each filled stop's slip, for the driver's route (design board "Main": "ตย.02 · 115 ลิตร") */
+export async function litersOfIssues(ids: string[], q: Db = db): Promise<Map<string, number>> {
+  if (ids.length === 0) return new Map();
+  const rows = await q
+    .select({ id: fuelIssueLines.issueId, liters: sql<string>`sum(${fuelIssueLines.liters})` })
+    .from(fuelIssueLines)
+    .where(inArray(fuelIssueLines.issueId, ids))
+    .groupBy(fuelIssueLines.issueId);
+  return new Map(rows.map((r) => [r.id, Number(r.liters)]));
 }
 
 /** API 8 answer: no route = 200 with stops [] */

@@ -13,9 +13,14 @@ async function signCurrentSlip(page: Page, name: string) {
   await expect(page.getByText("ผู้เซ็นรับ: - → " + name)).toBeVisible();
 }
 
+/** design 6.9: the cycle is picked in the "รอบเคลม" box of the header; choosing one opens it at once */
 async function openThisCycle(page: Page) {
   await page.goto("/invoices");
-  await page.getByRole("link", { name: /\(รอบนี้\)/ }).click();
+  const pick = page.getByLabel("รอบเคลม");
+  const value = await pick.locator("option", { hasText: "(รอบนี้)" }).getAttribute("value");
+  await pick.selectOption(value!);
+  await expect(page).toHaveURL(new RegExp(`[?&]cycle=${value}`));
+  await expect(pick).toHaveValue(value!);
 }
 
 test("signed slips make the invoice, unsigned ones wait and are said before closing", async ({ page }) => {
@@ -44,12 +49,12 @@ test("closing carries the unsigned slip on, locks the signed one and the invoice
 
   // signed slip is locked
   await page.goto("/issues?q=9");
-  await page.getByRole("link", { name: "9/1" }).click();
+  await page.getByRole("link", { name: "9 / 1" }).click();
   await expect(page.getByTestId("lock-note")).toContainText("ปิดแล้ว");
 
   // the carried slip can still be signed (it now sits in the next cycle)
   await page.goto("/issues?q=9");
-  await page.getByRole("link", { name: "9/2" }).click();
+  await page.getByRole("link", { name: "9 / 2" }).click();
   await signCurrentSlip(page, "สมหญิง");
 
   // invoice of DEMO1: only the signed slip, then walk the status

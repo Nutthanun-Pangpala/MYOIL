@@ -4,6 +4,7 @@ import { addDays, monthRange } from "@/domain/iso-date";
 import { ledgerRows, ledgerSummary, type LedgerRow } from "@/domain/ledger-rows";
 import { sumLiters } from "@/domain/money";
 import type { Session } from "@/lib/session";
+import { loadBills } from "@/server/prices/price-queries";
 
 export type LedgerMonth = {
   month: string;
@@ -85,7 +86,7 @@ export async function loadLedgerMonth(month: string, today: string): Promise<Led
   const [purchases, issues, prices, checks] = await Promise.all([
     purchasesByDay(from, through),
     issuesByDay(from, through),
-    db.select().from(schema.fuelPrices),
+    loadBills(),
     db.select().from(schema.stockChecks).where(and(gte(schema.stockChecks.checkDate, start), lte(schema.stockChecks.checkDate, through))),
   ]);
 
@@ -95,7 +96,7 @@ export async function loadLedgerMonth(month: string, today: string): Promise<Led
     to: through,
     purchases: purchases.map((p) => ({ date: p.date, liters: p.liters, amount: p.amount })),
     issues,
-    prices: prices.map((p) => ({ date: p.priceDate, pricePerLiter: p.pricePerLiter })),
+    prices,
     checks: checks.map((c) => ({ date: c.checkDate, liters: c.measuredLiters })),
   });
   const rows = all.filter((r) => r.date >= start);

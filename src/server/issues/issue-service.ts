@@ -7,7 +7,7 @@ import { lineAmount, sumAmounts, sumLiters } from "@/domain/money";
 import { thaiMonthShort, thaiShort } from "@/domain/thai-date";
 import type { Session } from "@/lib/session";
 import { cycleIdFor } from "../cycles/cycle-service";
-import { priceForDate } from "../prices/price-queries";
+import { billForDate, priceForDate } from "../prices/price-queries";
 import { visibleProjectIds } from "../projects/project-scope";
 import { checkSlipPhoto, type SlipPhotoInput } from "./slip-photo";
 
@@ -121,7 +121,9 @@ export async function createIssue(session: Session, input: IssueInput): Promise<
   const check = checkIssue(input, await loadIssueContext(input));
   if (!check.ok) return { ok: false, check };
 
-  const price = await priceForDate(input.issueDate); // null → "รอราคา": liters saved, money left empty
+  // the bill this slip draws on (latest purchase on or before its date); none → "รอราคา": liters saved, money left empty
+  const bill = await billForDate(input.issueDate);
+  const price = bill?.pricePerLiter ?? null;
 
   try {
     const id = await db.transaction(async (tx) => {
@@ -144,6 +146,7 @@ export async function createIssue(session: Session, input: IssueInput): Promise<
           receivedSigned: input.receivedSigned,
           receiverName: input.receivedSigned ? input.receiverName.trim() : input.receiverName.trim() || null,
           recordedBy: session.userId,
+          pricePurchaseId: bill?.id ?? null,
         })
         .returning({ id: fuelIssues.id });
 
@@ -190,7 +193,27 @@ export type IssueRow = {
   badges: IssueBadge[];
 };
 
-export type IssueFilters = { from?: string; to?: string; projectId?: string; q?: string; /** only slips not yet signed for (and not cancelled) */ unsigned?: boolean; /** part of a machine code */ machine?: string; status?: "cancelled" | "active"; /** only slips from the phone that nobody has checked yet */ review?: "pending" };
+/** the "สถานะ" dropdown of the list (design 6.3) + "รอตรวจ" for phone slips */
+export const ISSUE_STATES = ["normal", "unsigned", "pending_price", "pending_review", "invoiced", "cancelled"] as const;
+export type IssueState = (typeof ISSUE_STATES)[number];
+
+export type IssueFilters = {
+  from?: string;
+  to?: string;
+  projectId?: string;
+  q?: string;
+  /** only slips not yet signed for (and not cancelled) */ unsigned?: boolean;
+  /** a machine code, exactly as listed */ machine?: string;
+  status?: "cancelled" | "active";
+  /** one state of the list's dropdown */ state?: IssueState;
+  /** only slips from the phone that nobody has checked yet */ review?: "pending";
+};
+
+/** does a row of the list have this state ("ปกติ" = nothing to follow up) */
+export function hasState(badges: IssueBadge[], state: IssueState): boolean {
+  if (state === "normal") return badges.length === 0;
+  return badges.includes(state);
+}
 
 export async function listIssues(session: Session, f: IssueFilters): Promise<IssueRow[]> {
   const scope = await visibleProjectIds(session);
@@ -230,7 +253,7 @@ export async function listIssues(session: Session, f: IssueFilters): Promise<Iss
                 .select({ id: fuelIssueLines.issueId })
                 .from(fuelIssueLines)
                 .innerJoin(machines, eq(fuelIssueLines.machineId, machines.id))
-                .where(ilike(machines.code, `%${f.machine.trim()}%`)),
+                .where(eq(machines.code, f.machine.trim())),
             )
           : undefined,
         q ? or(ilike(fuelIssues.docNo, `%${q}%`), ilike(fuelIssues.bookNo, `%${q}%`)) : undefined,
@@ -256,7 +279,7 @@ export async function listIssues(session: Session, f: IssueFilters): Promise<Iss
   const byIssue = new Map<string, typeof lines>();
   for (const l of lines) (byIssue.get(l.issueId) ?? byIssue.set(l.issueId, []).get(l.issueId)!).push(l);
 
-  return heads.map((h) => {
+  const rows = heads.map((h) => {
     const ls = byIssue.get(h.id) ?? [];
     const priced = ls.filter((l) => l.amount !== null);
     const badges: IssueBadge[] = [];
@@ -280,12 +303,15 @@ export async function listIssues(session: Session, f: IssueFilters): Promise<Iss
       badges,
     };
   });
+  return f.state ? rows.filter((r) => hasState(r.badges, f.state!)) : rows;
 }
 
 export type IssueDetail = {
   head: typeof fuelIssues.$inferSelect & { projectRef: string; projectName: string; recordedByName: string };
   lines: { position: number; machine: string; hourMeter: number | null; liters: number; pricePerLiter: number | null; amount: number | null }[];
   audit: { action: string; at: Date; userName: string | null; changes: unknown }[];
+  /** the purchase bill the price comes from (null = รอราคา, or a slip priced before bills were linked) */
+  bill: { date: string; billNo: string | null; pricePerLiter: number } | null;
   /** label like "ก.ย. 2569" when the slip belongs to a closed cycle */
   closedCycleLabel: string | null;
   /** when the photo of the signed paper was attached (ms), null = none; used to refresh the browser's cached picture */
@@ -333,8 +359,17 @@ export async function getIssue(session: Session, id: string): Promise<IssueDetai
     .where(eq(schema.issueSignedPhotos.issueId, id))
     .limit(1);
 
+  const [bill] = row.issue.pricePurchaseId
+    ? await db
+        .select({ date: schema.fuelPurchases.purchaseDate, billNo: schema.fuelPurchases.billNo, pricePerLiter: schema.fuelPurchases.pricePerLiter })
+        .from(schema.fuelPurchases)
+        .where(eq(schema.fuelPurchases.id, row.issue.pricePurchaseId))
+        .limit(1)
+    : [];
+
   return {
     head: { ...row.issue, projectRef: row.projectRef, projectName: row.projectName, recordedByName: row.recordedByName },
+    bill: bill ?? null,
     lines,
     audit,
     closedCycleLabel: row.cycleStatus === "closed" ? thaiMonthShort(row.cycleStart!) : null,
@@ -356,6 +391,15 @@ export async function projectOptions(session: Session) {
 
 export async function machineOptions() {
   return db.select({ code: machines.code }).from(machines).orderBy(asc(machines.code));
+}
+
+/** "วันนี้คีย์แล้ว n ใบ" on the new-slip form: slips this person keyed since midnight (Bangkok) */
+export async function keyedToday(session: Session, today: string): Promise<number> {
+  const [r] = await db
+    .select({ n: count() })
+    .from(fuelIssues)
+    .where(and(eq(fuelIssues.recordedBy, session.userId), gte(fuelIssues.createdAt, new Date(`${today}T00:00:00+07:00`))));
+  return Number(r?.n ?? 0);
 }
 
 /** the slip number the admin most likely keys next: last slip of the same book + 1 */
@@ -481,17 +525,19 @@ export async function getIssueForEdit(session: Session, id: string) {
     receivedSigned: h.receivedSigned,
     receiverName: h.receiverName ?? "",
   };
-  return { input, lock: cur.lock };
+  return { input, lock: cur.lock, savedAt: h.createdAt.toISOString() };
 }
 
-export async function updateIssue(session: Session, id: string, input: IssueInput): Promise<ChangeResult> {
+/** `reason`: why the office changed it (the phone-slip check asks for one); kept in the slip's history */
+export async function updateIssue(session: Session, id: string, input: IssueInput, reason?: string): Promise<ChangeResult> {
   const cur = await loadForChange(session, id);
   if (!cur) return NOT_FOUND;
   if (cur.lock) return { ok: false, message: cur.lock };
   const check = checkIssue(input, await loadIssueContext(input, id));
   if (!check.ok) return { ok: false, message: "ตรวจช่องที่ขึ้นสีแดงก่อน", check };
 
-  const price = await priceForDate(input.issueDate);
+  const bill = await billForDate(input.issueDate);
+  const price = bill?.pricePerLiter ?? null;
   const before = cur.head;
   const changes: Record<string, [unknown, unknown]> = {};
   const note = (k: string, a: unknown, b: unknown) => a !== b && (changes[k] = [a, b]);
@@ -523,6 +569,7 @@ export async function updateIssue(session: Session, id: string, input: IssueInpu
       await tx
         .update(fuelIssues)
         .set({
+          pricePurchaseId: bill?.id ?? null,
           bookNo: input.bookNo.trim(),
           docNo: input.docNo.trim(),
           issueDate: input.issueDate,
@@ -568,6 +615,7 @@ export async function updateIssue(session: Session, id: string, input: IssueInpu
       if (before.source === "mobile" && before.receivedSigned && changes.lines) {
         await tx.update(fuelIssues).set({ editedAfterSign: true }).where(eq(fuelIssues.id, id));
       }
+      if (reason?.trim()) changes.reason = ["-", reason.trim()];
       await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "update", changes });
     });
     return { ok: true };

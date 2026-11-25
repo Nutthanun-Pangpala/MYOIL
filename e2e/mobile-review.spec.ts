@@ -37,7 +37,8 @@ test("check a phone slip: held machine name first, then ตรวจแล้ว
 
   await login(page, "store");
   await page.goto("/issues?review=pending");
-  await expect(page.getByText("รอตรวจ").first()).toBeVisible();
+  // the slip's row shows the status; "รอตรวจ" is also in the side menu (hidden text next to the count) and in the status dropdown
+  await expect(page.getByRole("row").filter({ hasText: "รอตรวจ" }).first()).toBeVisible();
 
   // the cycle page says what closing now would do
   await page.goto("/invoices");
@@ -86,7 +87,7 @@ test("editing a checked phone slip keeps its meter photo and marks it 'แก้
   await expect(page.getByAltText("รูปมิเตอร์ บรรทัด 1")).toBeVisible();
 });
 
-test("a purchase from the phone waits for ยืนยัน, then its price becomes the day's price", async ({ page, request }) => {
+test("a purchase from the phone is a price at once and still waits for ยืนยัน", async ({ page, request }) => {
   const res = await request.post("/api/bookcare/v1/purchases", {
     headers: { Authorization: `Bearer ${TEST_PUSH_KEY}` },
     data: { ref: randomUUID(), purchaseDate: today, recordedAt: null, driver: { bookcareUserId: "bc-1", name: "สมชาย" }, liters: "2000", amount: "64980.00", billNo: "INV-E2E", billPhoto: jpeg("bill") },
@@ -98,4 +99,33 @@ test("a purchase from the phone waits for ยืนยัน, then its price bec
   await page.getByRole("button", { name: "ยืนยัน", exact: true }).click();
   await expect(page.getByText("รอยืนยัน (จากมือถือ)")).toHaveCount(0);
   await expect(page.getByText("32.49").first()).toBeVisible(); // 64,980.00 ÷ 2,000 = 32.49 per liter
+});
+
+test("a phone slip dated after the day it reaches MYOIL is accepted but flagged for the checker (OBS-25)", async ({ page, request }) => {
+  // as in test round 10: a phone whose clock runs ahead sends a slip dated later than today
+  const ahead = new Date(Date.now() + 86_400_000).toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  const res = await request.post("/api/bookcare/v1/issues", {
+    headers: { Authorization: `Bearer ${TEST_PUSH_KEY}` },
+    data: {
+      ref: randomUUID(),
+      routeStopId: planStop(ahead, "DEMO2"),
+      projectRefCode: "DEMO2",
+      issueDate: ahead,
+      recordedAt: null,
+      driver: { bookcareUserId: "bc-1", name: "สมชาย" },
+      vehicleCode: null,
+      lines: [{ position: 1, machineId: null, machineCode: "FL022", liters: "90", hourMeter: null, photo: jpeg("meter-ahead") }],
+      signature: { receiverName: "สมศรี", signedAt: `${today}T10:00:00+07:00`, image: jpeg("sign-ahead") },
+      unsignedReason: null,
+      confirmedWarnings: [],
+    },
+  });
+  expect(res.status()).toBe(201);
+  const { issueId: id } = await res.json();
+
+  await login(page, "store");
+  await page.goto(`/issues/${id}`);
+  await expect(page.getByRole("list", { name: "สิ่งที่ระบบจับได้" })).toContainText("นาฬิกามือถืออาจผิด");
+  await page.goto("/check");
+  await expect(page.getByText("ลงวันที่ล่วงหน้า").first()).toBeVisible();
 });

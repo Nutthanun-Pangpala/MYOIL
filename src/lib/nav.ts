@@ -5,13 +5,16 @@ export type NavItem = { href: string; label: string; icon: string; roles: Role[]
 
 const all: Role[] = ["store_admin", "project_viewer", "executive", "system_admin"];
 
+// order = design canvas side menu (+ เส้นทางรถเติมน้ำมัน, owner 23 Nov)
 export const NAV: NavItem[] = [
   { href: "/", label: "ภาพรวม", icon: "home", roles: all },
   { href: "/issues", label: "ใบจ่ายน้ำมัน", icon: "file", roles: all },
+  { href: "/check", label: "ตรวจใบมือถือ", icon: "phone-check", roles: ["store_admin", "system_admin"] },
   { href: "/routes", label: "เส้นทางรถเติมน้ำมัน", icon: "route", roles: ["store_admin", "executive", "system_admin"] },
   { href: "/purchases", label: "ซื้อน้ำมันเข้า", icon: "truck", roles: ["store_admin", "system_admin"] },
   { href: "/ledger", label: "สมุดคงเหลือ", icon: "book", roles: ["store_admin", "executive", "system_admin"] },
   { href: "/monthly", label: "ตารางรายเดือน", icon: "grid", roles: all },
+  { href: "/machine-report", label: "รายงานเครื่องจักร", icon: "bars", roles: all },
   { href: "/invoices", label: "ใบแจ้งค่าใช้จ่าย", icon: "receipt", roles: ["store_admin", "project_viewer", "executive", "system_admin"] },
   { href: "/settings", label: "ตั้งค่า", icon: "cog", roles: ["system_admin"] },
 ];

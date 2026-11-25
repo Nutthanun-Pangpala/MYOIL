@@ -1,14 +1,12 @@
 import { and, asc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { TWO_DECIMALS_MESSAGE, hasAtMostTwoDecimals } from "@/domain/money";
 import { completePurchase, purchaseOddities } from "@/domain/purchase-calc";
-import { priceForDate } from "@/server/prices/price-queries";
+import { loadBills, priceForDate } from "@/server/prices/price-queries";
 import { ledgerMonths, tankCapacity } from "@/server/ledger/ledger-service";
 import { monthRange } from "@/domain/iso-date";
-import { pricePeriods, type PricePeriod } from "@/domain/price-periods";
-import { repriceOpen } from "@/domain/reprice";
+import { rebill, repriceOpen } from "@/domain/reprice";
 import type { Session } from "@/lib/session";
-import type { PriceInput, PurchaseInput } from "./parse-input";
+import type { PurchaseInput } from "./parse-input";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -21,7 +19,7 @@ export type PurchaseRow = {
   billNo: string | null;
   note: string | null;
   hasPhoto: boolean;
-  /** sent from the phone and not yet confirmed by an admin: counts in the tank, its price is not the day's price yet */
+  /** sent from the phone and not yet confirmed by an admin: it already counts in the tank and as a price */
   pendingConfirm: boolean;
   flags: string[];
   cancelled: boolean;
@@ -33,7 +31,6 @@ export type PurchaseRow = {
 
 export type PurchasePage = {
   purchases: PurchaseRow[];
-  periods: PricePeriod[];
   /** months to offer as chips, newest first (always includes the one shown) */
   months: string[];
 };
@@ -45,18 +42,16 @@ export type SaveResult =
 
 export async function loadPurchasePage(month: string, today: string): Promise<PurchasePage> {
   const { start, end } = monthRange(month);
-  const [purchases, prices, monthRows, allPurchaseDates] = await Promise.all([
+  const [purchases, monthRows] = await Promise.all([
     db
       .select()
       .from(schema.fuelPurchases)
       .where(and(gte(schema.fuelPurchases.purchaseDate, start), lte(schema.fuelPurchases.purchaseDate, end)))
       .orderBy(asc(schema.fuelPurchases.purchaseDate), asc(schema.fuelPurchases.createdAt)),
-    db.select().from(schema.fuelPrices),
     db
       .selectDistinct({ m: sql<string>`to_char(${schema.fuelPurchases.purchaseDate}, 'YYYY-MM')` })
       .from(schema.fuelPurchases)
       .where(isNull(schema.fuelPurchases.cancelledAt)),
-    db.select({ d: schema.fuelPurchases.purchaseDate, price: schema.fuelPurchases.pricePerLiter }).from(schema.fuelPurchases).where(isNull(schema.fuelPurchases.cancelledAt)),
   ]);
   const closedCycles = await db.select({ start: schema.claimCycles.startDate, end: schema.claimCycles.endDate }).from(schema.claimCycles).where(eq(schema.claimCycles.status, "closed"));
   const audit = purchases.length
@@ -68,8 +63,6 @@ export async function loadPurchasePage(month: string, today: string): Promise<Pu
         .orderBy(asc(schema.purchaseAudit.at))
     : [];
   const withPhoto = new Set((await db.select({ id: schema.purchaseBillPhotos.purchaseId }).from(schema.purchaseBillPhotos)).map((r) => r.id));
-  const purchaseDays = new Set(allPurchaseDates.map((r) => r.d));
-  const paid = new Set(allPurchaseDates.map((r) => `${r.d}|${r.price.toFixed(2)}`));
   const months = [...new Set([month, ...(await ledgerMonths(today)), ...monthRows.map((r) => r.m)])].sort().reverse();
   return {
     purchases: purchases.map((p) => ({
@@ -90,42 +83,35 @@ export async function loadPurchasePage(month: string, today: string): Promise<Pu
         .filter((a) => a.purchaseId === p.id && a.action !== "create")
         .map((a) => ({ action: a.action, userName: a.userName, at: a.at.toISOString(), text: describeChanges(a.changes) })),
     })),
-    periods: pricePeriods(
-      prices.map((p) => ({
-        date: p.priceDate,
-        pricePerLiter: p.pricePerLiter,
-        source: paid.has(`${p.priceDate}|${p.pricePerLiter.toFixed(2)}`) ? ("purchase" as const) : purchaseDays.has(p.priceDate) ? ("differs" as const) : ("manual" as const),
-      })),
-    ),
     months,
   };
 }
 
 /**
- * A price was added or corrected: every line of an OPEN cycle dated on/after it gets the price of its
- * own date (waiting lines get their first price; priced lines move when their price changed).
- * Lines of a closed cycle are never touched (a closed invoice never changes).
+ * A purchase bill was added, corrected, cancelled or brought back: every slip of an OPEN cycle points at the bill
+ * of its date again, and its lines take that bill's price (waiting lines get their first price; a slip whose only
+ * bill went away goes back to "รอราคา"). Slips of a closed cycle are never touched (a closed invoice never changes).
  */
-async function repriceOpenLines(tx: Tx, fromDate: string): Promise<{ priced: number; changed: number }> {
-  const prices = await tx.select().from(schema.fuelPrices);
+export async function repriceOpenLines(tx: Tx): Promise<{ priced: number; changed: number }> {
+  const bills = await loadBills(tx);
+  const open = and(isNull(schema.fuelIssues.cancelledAt), or(isNull(schema.fuelIssues.claimCycleId), ne(schema.claimCycles.status, "closed")));
   const lines = await tx
     .select({ id: schema.fuelIssueLines.id, issueDate: schema.fuelIssues.issueDate, liters: schema.fuelIssueLines.liters, currentPrice: schema.fuelIssueLines.pricePerLiter })
     .from(schema.fuelIssueLines)
     .innerJoin(schema.fuelIssues, eq(schema.fuelIssues.id, schema.fuelIssueLines.issueId))
     .leftJoin(schema.claimCycles, eq(schema.claimCycles.id, schema.fuelIssues.claimCycleId))
-    .where(
-      and(
-        isNull(schema.fuelIssues.cancelledAt),
-        gte(schema.fuelIssues.issueDate, fromDate),
-        or(isNull(schema.fuelIssues.claimCycleId), ne(schema.claimCycles.status, "closed")),
-      ),
-    );
-  const updates = repriceOpen(
-    lines,
-    prices.map((p) => ({ date: p.priceDate, pricePerLiter: p.pricePerLiter })),
-  );
+    .where(open);
+  const updates = repriceOpen(lines, bills);
   for (const u of updates) {
     await tx.update(schema.fuelIssueLines).set({ pricePerLiter: u.pricePerLiter, amount: u.amount }).where(eq(schema.fuelIssueLines.id, u.id));
+  }
+  const slips = await tx
+    .select({ id: schema.fuelIssues.id, issueDate: schema.fuelIssues.issueDate, billId: schema.fuelIssues.pricePurchaseId })
+    .from(schema.fuelIssues)
+    .leftJoin(schema.claimCycles, eq(schema.claimCycles.id, schema.fuelIssues.claimCycleId))
+    .where(open);
+  for (const r of rebill(slips, bills)) {
+    await tx.update(schema.fuelIssues).set({ pricePurchaseId: r.billId }).where(eq(schema.fuelIssues.id, r.id));
   }
   const priced = updates.filter((u) => u.wasWaiting).length;
   return { priced, changed: updates.length - priced };
@@ -134,11 +120,10 @@ async function repriceOpenLines(tx: Tx, fromDate: string): Promise<{ priced: num
 function repriceWarnings(r: { priced: number; changed: number }): string[] {
   const w: string[] = [];
   if (r.priced > 0) w.push(`ตั้งราคาให้ใบจ่ายที่รอราคาแล้ว ${r.priced} รายการ`);
-  if (r.changed > 0) w.push(`ปรับราคาใบจ่ายที่ใช้ราคาเดิมแล้ว ${r.changed} รายการ (เฉพาะรอบที่ยังไม่ปิด)`);
+  if (r.changed > 0) w.push(`ปรับราคาใบจ่ายตามบิลซื้อแล้ว ${r.changed} รายการ (เฉพาะรอบที่ยังไม่ปิด)`);
   return w;
 }
 
-const baht = (n: number) => n.toFixed(2);
 
 export async function createPurchase(session: Session, input: PurchaseInput): Promise<SaveResult> {
   if (!input.date) return { ok: false, error: "เลือกวันที่ซื้อ", field: "date" };
@@ -175,35 +160,10 @@ export async function createPurchase(session: Session, input: PurchaseInput): Pr
     await tx.insert(schema.purchaseAudit).values({ purchaseId: bought.id, userId: session.userId, action: "create", changes: null });
 
     const warnings: string[] = [];
-    const [existing] = await tx.select().from(schema.fuelPrices).where(eq(schema.fuelPrices.priceDate, input.date));
-    if (!existing) {
-      await tx.insert(schema.fuelPrices).values({ priceDate: input.date, pricePerLiter: calc.price, createdBy: session.userId });
-    } else if (existing.pricePerLiter !== calc.price) {
-      // never overwrite silently: the day's price is shared by buy and bill
-      warnings.push(`ราคาประจำวันนี้ ${baht(existing.pricePerLiter)} บาท ไม่ตรงกับราคาที่ซื้อ ${baht(calc.price)} บาท — ใช้ราคาเดิมต่อ แก้ได้ที่ "ราคาประจำวัน"`);
-    }
-    warnings.push(...repriceWarnings(await repriceOpenLines(tx, input.date)));
+    warnings.push(...repriceWarnings(await repriceOpenLines(tx)));
     return { ok: true as const, warnings };
   });
 }
-
-/** set or correct the price of a day that had no purchase (or fix one that did) */
-export async function setDailyPrice(session: Session, input: PriceInput): Promise<SaveResult> {
-  if (!input.date) return { ok: false, error: "เลือกวันที่", field: "date" };
-  if (input.price === null || input.price <= 0) return { ok: false, error: "กรอกราคาต่อลิตรให้มากกว่า 0", field: "price" };
-  if (!hasAtMostTwoDecimals(input.price)) return { ok: false, error: TWO_DECIMALS_MESSAGE, field: "price" };
-  const price = input.price;
-
-  return db.transaction(async (tx) => {
-    await tx
-      .insert(schema.fuelPrices)
-      .values({ priceDate: input.date, pricePerLiter: price, createdBy: session.userId })
-      .onConflictDoUpdate({ target: schema.fuelPrices.priceDate, set: { pricePerLiter: price } });
-    return { ok: true as const, warnings: repriceWarnings(await repriceOpenLines(tx, input.date)) };
-  });
-}
-
-
 
 // ───────────── change a saved purchase (OBS-18): edit, cancel (with a reason), restore. Never deleted. ─────────────
 
@@ -258,10 +218,7 @@ export async function updatePurchase(session: Session, id: string, input: Purcha
     await tx.insert(schema.purchaseAudit).values({ purchaseId: id, userId: session.userId, action: "update", changes });
 
     const warnings: string[] = [];
-    const [day] = await tx.select().from(schema.fuelPrices).where(eq(schema.fuelPrices.priceDate, input.date));
-    if (!day) await tx.insert(schema.fuelPrices).values({ priceDate: input.date, pricePerLiter: calc.price, createdBy: session.userId });
-    else if (day.pricePerLiter !== calc.price) warnings.push(`ราคาประจำวันที่ ${input.date} ยังเป็น ${baht(day.pricePerLiter)} บาท ไม่เปลี่ยนตามการแก้ไข แก้ได้ที่ "ราคาประจำวัน"`);
-    warnings.push(...repriceWarnings(await repriceOpenLines(tx, input.date < cur.purchaseDate ? input.date : cur.purchaseDate)));
+    warnings.push(...repriceWarnings(await repriceOpenLines(tx)));
     return { ok: true as const, warnings };
   });
 }
@@ -277,6 +234,7 @@ export async function cancelPurchase(session: Session, id: string, reason: strin
     if (await inClosedCycle(tx, cur.purchaseDate)) return { ok: false as const, message: CLOSED_LOCK };
     await tx.update(schema.fuelPurchases).set({ cancelledAt: new Date(), cancelReason: reason.trim(), cancelledBy: session.userId }).where(eq(schema.fuelPurchases.id, id));
     await tx.insert(schema.purchaseAudit).values({ purchaseId: id, userId: session.userId, action: "cancel", changes: { reason: [null, reason.trim()] } });
+    await repriceOpenLines(tx); // slips that drew on this bill fall back to the bill before it (or to "รอราคา")
     return { ok: true as const };
   });
 }
@@ -289,12 +247,13 @@ export async function restorePurchase(session: Session, id: string): Promise<Cha
     if (await inClosedCycle(tx, cur.purchaseDate)) return { ok: false as const, message: CLOSED_LOCK };
     await tx.update(schema.fuelPurchases).set({ cancelledAt: null, cancelReason: null, cancelledBy: null }).where(eq(schema.fuelPurchases.id, id));
     await tx.insert(schema.purchaseAudit).values({ purchaseId: id, userId: session.userId, action: "restore", changes: null });
+    await repriceOpenLines(tx);
     return { ok: true as const };
   });
 }
 
 
-/** an admin confirms a purchase sent from the phone: the bill's price becomes the day's price (same rule as keying a purchase) */
+/** an admin confirms a purchase sent from the phone. Its price was already in use from the moment it arrived (owner, 25 Nov 2026). */
 export async function confirmPurchase(session: Session, id: string): Promise<ChangeResult & { warnings?: string[] }> {
   return db.transaction(async (tx) => {
     const [cur] = await tx.select().from(schema.fuelPurchases).where(eq(schema.fuelPurchases.id, id)).for("update").limit(1);
@@ -305,14 +264,6 @@ export async function confirmPurchase(session: Session, id: string): Promise<Cha
     await tx.update(schema.fuelPurchases).set({ status: "confirmed", confirmedBy: session.userId, confirmedAt: new Date() }).where(eq(schema.fuelPurchases.id, id));
     await tx.insert(schema.purchaseAudit).values({ purchaseId: id, userId: session.userId, action: "update", changes: { status: ["รอยืนยัน", "ยืนยันแล้ว"] } });
 
-    const warnings: string[] = [];
-    const [existing] = await tx.select().from(schema.fuelPrices).where(eq(schema.fuelPrices.priceDate, cur.purchaseDate));
-    if (!existing) {
-      await tx.insert(schema.fuelPrices).values({ priceDate: cur.purchaseDate, pricePerLiter: cur.pricePerLiter, createdBy: session.userId });
-    } else if (existing.pricePerLiter !== cur.pricePerLiter) {
-      warnings.push(`ราคาประจำวันนี้ ${baht(existing.pricePerLiter)} บาท ไม่ตรงกับราคาที่ซื้อ ${baht(cur.pricePerLiter)} บาท — ใช้ราคาเดิมต่อ แก้ได้ที่ "ราคาประจำวัน"`);
-    }
-    warnings.push(...repriceWarnings(await repriceOpenLines(tx, cur.purchaseDate)));
-    return { ok: true as const, warnings };
+    return { ok: true as const, warnings: repriceWarnings(await repriceOpenLines(tx)) };
   });
 }
