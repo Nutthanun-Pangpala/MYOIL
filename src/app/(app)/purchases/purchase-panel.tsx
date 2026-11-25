@@ -15,7 +15,7 @@ const toNum = (s: string): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-type Err = { field?: "date" | "liters" | "price" | "amount" | "photo"; text: string };
+type Err = { field?: "date" | "time" | "liters" | "price" | "amount" | "photo"; text: string };
 
 const input = "h-11 w-full rounded-control border bg-card px-3";
 const label = "text-sm";
@@ -33,7 +33,7 @@ export function PurchasePanel({
   /** only purchases now: the daily price list was cut on 25 Nov 2026 (a slip uses the price of its bill) */
   mode: "purchase";
   /** a saved purchase being changed (OBS-18) */
-  editing?: { id: string; date: string; liters: number; price: number; amount: number; billNo: string; note: string };
+  editing?: { id: string; date: string; time: string | null; liters: number; price: number; amount: number; billNo: string; note: string };
   month: string;
   today: string;
   initialDate: string;
@@ -44,6 +44,11 @@ export function PurchasePanel({
   const isPurchase = mode === "purchase";
 
   const [date, setDate] = useState(editing?.date ?? (initialDate || (isPurchase ? today : "")));
+  // the time on the bill: with the date it decides which bill is used up first (brief §14 B9)
+  const [time, setTime] = useState(editing ? (editing.time ?? "") : "");
+  useEffect(() => {
+    if (!editing) setTime((t) => t || new Date(Date.now() + 7 * 3_600_000).toISOString().slice(11, 16));
+  }, [editing]);
   const [liters, setLiters] = useState(editing ? String(editing.liters) : "");
   const [price, setPrice] = useState(editing ? String(editing.price) : initialPrice === null ? "" : String(initialPrice));
   const [amount, setAmount] = useState(""); // editing: liters × price recompute it
@@ -54,7 +59,7 @@ export function PurchasePanel({
   const [error, setError] = useState<Err | null>(null);
   const [notes, setNotes] = useState<string[] | null>(null); // saved, but there is something to read
   const [odd, setOdd] = useState<string[] | null>(null); // looks odd: asked before saving (OBS-17)
-  useEffect(() => setOdd(null), [date, liters, price, amount]); // a changed number needs a fresh question
+  useEffect(() => setOdd(null), [date, time, liters, price, amount]); // a changed number needs a fresh question
 
   // two of three filled → show the third as a hint (the server recomputes on save)
   const calc = useMemo(
@@ -77,7 +82,7 @@ export function PurchasePanel({
       if ((isPurchase || field === "price") && text.trim() !== "" && toNum(text) === null) return setError({ field, text: `${FIELD_NAME[field]} ต้องเป็นตัวเลข` });
     }
     start(async () => {
-      const body = { date, liters: toNum(liters), price: toNum(price), amount: toNum(amount), billNo, note, billPhoto: photo, confirmed };
+      const body = { date, time, liters: toNum(liters), price: toNum(price), amount: toNum(amount), billNo, note, billPhoto: photo, confirmed };
       const r = editing ? await updatePurchaseAction(editing.id, body) : await savePurchaseAction(body);
       if (!r.ok) return r.confirm ? setOdd(r.confirm) : setError({ field: r.field, text: r.error });
       router.refresh();
@@ -104,6 +109,14 @@ export function PurchasePanel({
             วันที่
           </label>
           <input id="p-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required className={`${input} ${border("date")}`} />
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <label htmlFor="p-time" className={label}>
+            เวลาบนบิล
+          </label>
+          <input id="p-time" type="time" value={time} onChange={(e) => setTime(e.target.value)} required={!editing || editing.time !== null} className={`${input} ${border("time")}`} />
+          <span className="text-[13px] text-muted">น้ำมันของบิลที่เข้าก่อนถูกใช้ก่อน ระบบเรียงบิลตามวันที่และเวลานี้</span>
         </div>
 
         {isPurchase && (
@@ -192,13 +205,13 @@ export function PurchasePanel({
 
         {odd && (
           <div role="alert" className="flex flex-col gap-2 rounded-control bg-safety-soft px-3 py-3 text-sm">
-            <strong>ตรวจก่อนบันทึก ตัวเลขนี้ดูผิดปกติ</strong>
+            <strong>ตรวจก่อนบันทึก</strong>
             <ul className="list-disc pl-5">
               {odd.map((o) => (
                 <li key={o}>{o}</li>
               ))}
             </ul>
-            <span>ถ้าถูกต้องตามบิล กดยืนยันบันทึก ถ้าไม่ใช่ แก้ตัวเลขด้านบน</span>
+            <span>ถ้าถูกต้องตามบิล กดยืนยันบันทึก ถ้าไม่ใช่ แก้ข้อมูลด้านบน</span>
             <Button type="button" variant="primary" disabled={pending} onClick={(e) => submit(e, true)}>
               {pending ? "กำลังบันทึก…" : "ยืนยันบันทึก"}
             </Button>

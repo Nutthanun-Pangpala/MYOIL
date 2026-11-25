@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { cancelPurchaseAction, confirmPurchaseAction, restorePurchaseAction } from "./actions";
 
+type Result = { ok: boolean; message?: string; warnings?: string[]; confirm?: string[] };
+
 /** edit · cancel (asks first, needs a reason) · restore — OBS-18 */
 export function PurchaseRowActions({ id, month, cancelled, lock, pendingConfirm = false }: { id: string; month: string; cancelled: boolean; lock: string | null; pendingConfirm?: boolean }) {
   const router = useRouter();
@@ -12,18 +14,22 @@ export function PurchaseRowActions({ id, month, cancelled, lock, pendingConfirm 
   const [asking, setAsking] = useState(false);
   const [reason, setReason] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  /** B5: slips would get another amount — shown first, done only after "ยืนยัน" */
+  const [ask, setAsk] = useState<{ notes: string[]; go: () => Promise<Result> } | null>(null);
 
-  function run(fn: () => Promise<{ ok: boolean; message?: string; warnings?: string[] }>) {
+  function run(fn: (confirmed: boolean) => Promise<Result>, confirmed = false) {
     setMsg(null);
+    setAsk(null);
     start(async () => {
       try {
-        const r = await fn();
+        const r = await fn(confirmed);
         if (r.ok) {
           setAsking(false);
           setReason("");
           if (r.warnings?.length) setMsg(r.warnings.join(" · "));
           router.refresh();
-        } else setMsg(r.message ?? "ทำไม่สำเร็จ");
+        } else if (r.confirm?.length) setAsk({ notes: r.confirm, go: () => fn(true) });
+        else setMsg(r.message ?? "ทำไม่สำเร็จ");
       } catch {
         setMsg("ทำไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองอีกครั้ง");
       }
@@ -36,7 +42,7 @@ export function PurchaseRowActions({ id, month, cancelled, lock, pendingConfirm 
     <div className="flex flex-col items-start gap-1">
       <div className="flex gap-3">
         {cancelled ? (
-          <button type="button" className={link} disabled={busy} onClick={() => run(() => restorePurchaseAction(id))}>
+          <button type="button" className={link} disabled={busy} onClick={() => run((c) => restorePurchaseAction(id, c))}>
             นำกลับมา
           </button>
         ) : (
@@ -63,11 +69,26 @@ export function PurchaseRowActions({ id, month, cancelled, lock, pendingConfirm 
           </label>
           <span className="text-[13px] text-muted">รายการที่ยกเลิกจะไม่นับในสมุดคงเหลือ แต่ยังเก็บไว้ในรายการ กด “นำกลับมา” ได้ภายหลัง</span>
           <div className="flex gap-3">
-            <button type="button" className={link} disabled={busy} onClick={() => run(() => cancelPurchaseAction(id, reason))}>
+            <button type="button" className={link} disabled={busy} onClick={() => run((c) => cancelPurchaseAction(id, reason, c))}>
               ยืนยันยกเลิก
             </button>
             <button type="button" className={link} onClick={() => setAsking(false)}>
               ไม่ยกเลิก
+            </button>
+          </div>
+        </div>
+      )}
+      {ask && (
+        <div role="alert" className="flex max-w-[320px] flex-col gap-2 rounded-control bg-safety-soft p-2 text-[13px]">
+          {ask.notes.map((n) => (
+            <span key={n}>{n}</span>
+          ))}
+          <div className="flex gap-3">
+            <button type="button" className={link} disabled={busy} onClick={() => run(ask.go, true)}>
+              ยืนยันทำต่อ
+            </button>
+            <button type="button" className={link} onClick={() => setAsk(null)}>
+              ไม่ทำ
             </button>
           </div>
         </div>

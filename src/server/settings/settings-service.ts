@@ -6,6 +6,7 @@ import { cycleRanges, dayAfter, isCutDay } from "@/domain/cycle";
 import type { Session } from "@/lib/session";
 import { hashSecret } from "@/lib/password";
 import { cutDay, cycleIdFor } from "../cycles/cycle-service";
+import { repriceOpenLines } from "../prices/fifo-service";
 
 const { projects, machines, users, userProjects, appSettings, claimCycles, fuelIssues } = schema;
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
@@ -139,21 +140,29 @@ export async function loadTank() {
     low: s?.lowLevelLiters ?? null,
     opening: s?.openingLiters ?? 0,
     openingDate: s?.openingDate ?? null,
+    /** price per liter of the opening stock (brief §14 B8) */
+    openingPrice: s?.openingPrice ?? null,
     /** the opening balance can be edited until the first cycle is closed */
     openingLocked: Number(closed.n) > 0,
   };
 }
 
-export async function saveTank(t: { capacity: number | null; low: number | null; opening: number; openingDate: string | null }): Promise<Result<TankErrors>> {
-  const errors = validateTank(t);
-  if (Object.keys(errors).length) return { ok: false, errors };
+export async function saveTank(t: { capacity: number | null; low: number | null; opening: number; openingDate: string | null; openingPrice: number | null }): Promise<Result<TankErrors>> {
   const cur = await loadTank();
-  if (cur.openingLocked && (cur.opening !== t.opening || cur.openingDate !== t.openingDate)) {
+  const errors = validateTank(cur.openingLocked ? { ...t, openingPrice: t.openingPrice ?? cur.openingPrice ?? 1 } : t);
+  if (Object.keys(errors).length) return { ok: false, errors };
+  if (cur.openingLocked && (cur.opening !== t.opening || cur.openingDate !== t.openingDate || (t.openingPrice !== null && cur.openingPrice !== t.openingPrice))) {
     return { ok: false, errors: { opening: "แก้ยอดยกมาไม่ได้แล้ว เพราะปิดรอบไปแล้ว" } };
   }
-  const values = { tankCapacityLiters: t.capacity, lowLevelLiters: t.low, openingLiters: t.opening, openingDate: t.openingDate };
-  await db.insert(appSettings).values({ id: 1, ...values }).onConflictDoUpdate({ target: appSettings.id, set: values });
-  return { ok: true, message: "บันทึกค่าของรถเติมน้ำมันแล้ว" };
+  const openingPrice = cur.openingLocked ? cur.openingPrice : t.openingPrice;
+  const values = { tankCapacityLiters: t.capacity, lowLevelLiters: t.low, openingLiters: t.opening, openingDate: t.openingDate, openingPrice };
+  // the opening stock is the first fuel used (oldest first): its liters, date and price move the money of open slips
+  const r = await db.transaction(async (tx) => {
+    await tx.insert(appSettings).values({ id: 1, ...values }).onConflictDoUpdate({ target: appSettings.id, set: values });
+    return repriceOpenLines(tx);
+  });
+  const n = r.priced + r.changed;
+  return { ok: true, message: n > 0 ? `บันทึกค่าของรถเติมน้ำมันแล้ว คิดเงินใบจ่ายใหม่ ${n} ใบ` : "บันทึกค่าของรถเติมน้ำมันแล้ว" };
 }
 
 // ───────────── cycles ─────────────

@@ -57,7 +57,9 @@ test("a slip with no purchase bill before it waits, and is priced when the bill 
   await page.goto("/purchases?month=2026-01&new=purchase");
   const form = page.getByRole("form", { name: "บันทึกการซื้อ" });
   await form.getByLabel("วันที่").fill("2026-01-15");
-  await form.getByLabel("เติมเข้า (ลิตร)").fill("1000");
+  // exactly the slip's 100 liters: the waiting slip uses this bill up, so today's slips stay on their own bill
+  // (oldest fuel first — a bigger bill dated in January would be used by today's slips too, and ask first)
+  await form.getByLabel("เติมเข้า (ลิตร)").fill("100");
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(form.getByRole("status")).toContainText("ตั้งราคาให้ใบจ่ายที่รอราคาแล้ว 1 รายการ");

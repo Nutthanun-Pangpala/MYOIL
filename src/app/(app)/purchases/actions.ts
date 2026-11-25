@@ -24,21 +24,21 @@ export async function updatePurchaseAction(id: string, raw: unknown): Promise<Sa
   return r;
 }
 
-export async function cancelPurchaseAction(id: string, reason: string): Promise<ChangeResult> {
+export async function cancelPurchaseAction(id: string, reason: string, confirmed = false): Promise<ChangeResult> {
   const session = await requireWriter();
-  const r = await cancelPurchase(session, id, typeof reason === "string" ? reason.slice(0, 300) : "");
+  const r = await cancelPurchase(session, id, typeof reason === "string" ? reason.slice(0, 300) : "", confirmed === true);
   if (r.ok) refresh();
   return r;
 }
 
-export async function restorePurchaseAction(id: string): Promise<ChangeResult> {
+export async function restorePurchaseAction(id: string, confirmed = false): Promise<ChangeResult> {
   const session = await requireWriter();
-  const r = await restorePurchase(session, id);
+  const r = await restorePurchase(session, id, confirmed === true);
   if (r.ok) refresh();
   return r;
 }
 
-export async function confirmPurchaseAction(id: string): Promise<ChangeResult & { warnings?: string[] }> {
+export async function confirmPurchaseAction(id: string): Promise<ChangeResult> {
   const session = await requireWriter();
   const r = await confirmPurchase(session, id);
   if (r.ok) refresh();

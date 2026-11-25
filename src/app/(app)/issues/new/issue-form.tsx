@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { Toast } from "@/components/toast";
 import { Button, Card, Kbd, Pill, linkButton } from "@/components/ui";
 import { checkIssue, nextDocNo, type IssueCheck, type IssueInput } from "@/domain/issue-check";
-import { hasAtMostTwoDecimals, lineAmount, sumAmounts, sumLiters } from "@/domain/money";
+import { hasAtMostTwoDecimals, sumLiters } from "@/domain/money";
 import { thaiShort } from "@/domain/thai-date";
 import { formatBaht, formatLiters } from "@/lib/format";
 import { shrinkImage } from "@/lib/image-shrink";
@@ -90,7 +90,7 @@ export function IssueForm({
 
   // ── live checks from the server (duplicates, closed cycle, history) merged over the instant local rules ──
   // `input` = what the answer was asked about: an answer for older input is never shown or used (BUG-04)
-  const [server, setServer] = useState<{ check: IssueCheck; price: number | null; duplicateIssueId: string | null; input: IssueInput } | null>(null);
+  const [server, setServer] = useState<{ check: IssueCheck; price: number | null; amount: number | null; split: { price: number | null; liters: number }[]; duplicateIssueId: string | null; input: IssueInput } | null>(null);
   const local = useMemo(
     () => checkIssue(input, { duplicateIssueId: null, closedCycleLabel: null, history: {} }),
     [input],
@@ -105,7 +105,8 @@ export function IssueForm({
   }, [input]);
   const fresh = server && server.input === input ? server : null;
   const check = fresh?.check ?? local;
-  const price = server?.price ?? null;
+  // the money comes from the server: these liters cut into purchase bills, oldest fuel first (brief §14)
+  const split = fresh?.split ?? [];
 
   // errors for empty required fields appear once the person has touched the form or pressed save
   const [attempted, setAttempted] = useState(false);
@@ -135,26 +136,33 @@ export function IssueForm({
   // OBS-19: a liters value with a 3rd decimal is refused, so never show totals computed from it
   const badLiters = litersOf.some((l) => !hasAtMostTwoDecimals(l));
   const totalLiters = sumLiters(litersOf);
-  const totalAmount = price === null || badLiters ? null : sumAmounts(litersOf.map((l) => lineAmount(l, price)));
+  const totalAmount = badLiters ? null : (fresh?.amount ?? null);
 
   // ── save ──
   const [saveError, setSaveError] = useState<string | null>(null);
-  function save(mode: "done" | "next") {
+  /** B5: other slips would get another amount — shown first, saved only after "ยืนยันบันทึก" */
+  const [ask, setAsk] = useState<string[] | null>(null);
+  const askMode = useRef<"done" | "next">("done");
+  useEffect(() => setAsk(null), [input]);
+  function save(mode: "done" | "next", confirmed = false) {
     if (saving) return; // Ctrl+Enter while the first save is still on its way must not send the slip twice (OBS-34)
     setAttempted(true);
     setSaveError(null);
+    setAsk(null);
+    askMode.current = mode;
     // the instant rules decide whether to send; the server re-checks everything and answers with its own errors
     if (!local.ok) return;
     startSaving(async () => {
       try {
         if (edit) {
-          const r = await updateIssueAction(edit.id, input);
+          const r = await updateIssueAction(edit.id, input, confirmed);
           if (r.ok) router.push(`/issues/${edit.id}?saved=1`);
-          else if (r.check) setServer({ check: r.check, price, duplicateIssueId: null, input });
+          else if (r.confirm) setAsk(r.confirm);
+          else if (r.check) setServer({ check: r.check, price: null, amount: null, split: [], duplicateIssueId: null, input });
           else setSaveError(r.message);
           return;
         }
-        const res = await saveIssueAction(input, slipPhoto);
+        const res = await saveIssueAction(input, slipPhoto, confirmed);
         if (res.ok) {
           if (res.photoError) {
             // the slip is saved; only the picture failed → say so on the slip's page, where it can be attached again
@@ -166,8 +174,10 @@ export function IssueForm({
           } else {
             router.push(`/issues/${res.id}?saved=1`);
           }
+        } else if (res.confirm) {
+          setAsk(res.confirm);
         } else {
-          setServer({ check: res.check, price, duplicateIssueId: null, input });
+          setServer({ check: res.check, price: null, amount: null, split: [], duplicateIssueId: null, input });
         }
       } catch {
         setSaveError("บันทึกไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองอีกครั้ง");
@@ -512,9 +522,18 @@ export function IssueForm({
               </div>
             )}
             <div className="flex flex-col gap-3">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-tank-text">ราคาวันที่ {issueDate ? thaiShort(issueDate) : "-"}</span>
-                <span>{price === null ? "ยังไม่มีราคา" : `${formatBaht(price)} บาท/ลิตร`}</span>
+              <div data-testid="slip-prices" className="flex flex-col gap-1">
+                <span className="text-tank-text">ราคาตามบิลซื้อ (เข้าก่อนใช้ก่อน)</span>
+                {split.length === 0 ? (
+                  <span>-</span>
+                ) : (
+                  split.map((p) => (
+                    <span key={String(p.price)} className="flex items-baseline justify-between gap-3">
+                      <span>{formatLiters(p.liters)} ลิตร</span>
+                      <span>{p.price === null ? "รอราคา" : `${formatBaht(p.price)} บาท/ลิตร`}</span>
+                    </span>
+                  ))
+                )}
               </div>
               <div className="flex items-center justify-between gap-3 border-t border-white/16 pt-3">
                 <span className="text-tank-text">ยอดเงิน</span>
@@ -526,9 +545,9 @@ export function IssueForm({
                   <span className="font-display text-2xl font-medium">{formatBaht(totalAmount)} บาท</span>
                 )}
               </div>
-              {price === null && issueDate && (
+              {split.some((p) => p.price === null) && issueDate && (
                 <span className="text-sm text-tank-text">
-                  บันทึกลิตรได้เลย ยอดเงินจะคิดให้เมื่อมีบิลซื้อที่ลงวันที่ไม่เกินวันนี้ของใบ{" "}
+                  บันทึกลิตรได้เลย ลิตรที่ยังไม่มีบิลซื้อรองรับ หรือบิลยังรอยืนยัน จะขึ้น “รอราคา” และคิดเงินให้เองเมื่อมีบิล{" "}
                   <Link href={`/purchases?month=${issueDate.slice(0, 7)}&new=purchase&date=${issueDate}`} className="text-white underline">
                     บันทึกการซื้อ
                   </Link>
@@ -551,6 +570,17 @@ export function IssueForm({
                   บันทึก
                 </Button>
               </>
+            )}
+            {ask && (
+              <div role="alert" className="flex flex-col gap-2 rounded-control bg-safety-soft px-3 py-3 text-sm">
+                <strong>ตรวจก่อนบันทึก</strong>
+                {ask.map((a) => (
+                  <span key={a}>{a}</span>
+                ))}
+                <Button type="button" variant="primary" disabled={saving} onClick={() => save(askMode.current, true)}>
+                  ยืนยันบันทึก
+                </Button>
+              </div>
             )}
             {saving && (
               <p role="status" className="flex items-center justify-center gap-2 text-sm text-muted">

@@ -109,7 +109,7 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
 
       <div className="flex flex-wrap gap-4">
         {stat("จ่ายออก", formatLiters(v.breakdown.liters), "ลิตร", `${v.breakdown.rows.length} โครงการที่มีการเติม`, `/monthly?month=${month}`)}
-        {stat("มูลค่าน้ำมันที่จ่ายออก", formatBaht(v.breakdown.amount), "บาท", `${v.price === null ? "ยังไม่มีราคาน้ำมัน" : `ราคาวันนี้ ${formatBaht(v.price)} บาท/ลิตร`}${v.breakdown.unsignedAmount > 0 ? ` · ในนี้ยังไม่เซ็นรับ ${formatBaht(v.breakdown.unsignedAmount)} บาท` : ""}`, "/invoices")}
+        {stat("มูลค่าน้ำมันที่จ่ายออก", formatBaht(v.breakdown.amount), "บาท", `${v.stockValue ? `คงเหลือในรถ ${formatLiters(v.stockValue.liters)} ลิตร มูลค่า ${formatBaht(v.stockValue.amount)} บาท` : "คิดตามราคาบิลซื้อ"}${v.breakdown.unsignedAmount > 0 ? ` · ในนี้ยังไม่เซ็นรับ ${formatBaht(v.breakdown.unsignedAmount)} บาท` : ""}`, "/invoices")}
         {stat("ใบจ่าย", String(v.breakdown.slips), "ใบ", `วันนี้ ${v.todaySlips} ใบ`, `/issues?from=${v.range.start}&to=${v.range.end}`)}
       </div>
 

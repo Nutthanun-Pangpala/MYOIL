@@ -52,6 +52,7 @@ async function main() {
   for (let ago = DAYS - 2; ago >= 0; ago -= 5) {
     const r = await createPurchase(session, {
       date: daysAgo(ago),
+      time: "08:00",
       liters: 6000 + Math.round(rnd() * 4) * 500,
       price: prices[n++ % prices.length],
       amount: null,

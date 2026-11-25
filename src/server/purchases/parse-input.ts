@@ -5,6 +5,8 @@
 
 export type PurchaseInput = {
   date: string;
+  /** "HH:MM" on the bill: with the date it decides which bill is used up first (brief §14 B9) */
+  time: string;
   liters: number | null;
   price: number | null;
   amount: number | null;
@@ -28,10 +30,14 @@ const isoDate = (v: unknown) => {
   return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v ? "" : v;
 };
 
+/** a real time of day "HH:MM", else "" */
+export const clock = (v: unknown) => (typeof v === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : "");
+
 export function parsePurchaseInput(raw: unknown): PurchaseInput {
   const r = obj(raw);
   return {
     date: isoDate(r.date),
+    time: clock(r.time),
     liters: num(r.liters),
     price: num(r.price),
     amount: num(r.amount),

@@ -5,11 +5,11 @@ import { useState, useTransition } from "react";
 import { Toast } from "@/components/toast";
 import { Button, Card, CardTitle, Field, fieldBadClass, fieldClass } from "@/components/ui";
 import { thaiShort } from "@/domain/thai-date";
-import { formatLiters } from "@/lib/format";
+import { formatBaht, formatLiters } from "@/lib/format";
 import { saveTankAction } from "../actions";
 import { SettingsHeader } from "../settings-header";
 
-type Initial = { capacity: number | null; low: number | null; opening: number; openingDate: string | null; openingLocked: boolean };
+type Initial = { capacity: number | null; low: number | null; opening: number; openingDate: string | null; openingPrice: number | null; openingLocked: boolean };
 const num = (s: string): number | null => {
   const t = s.replace(/,/g, "").trim();
   if (!t) return null;
@@ -26,6 +26,7 @@ export function TankForm({ initial }: { initial: Initial }) {
   const [low, setLow] = useState(initial.low === null ? "" : String(initial.low));
   const [opening, setOpening] = useState(String(initial.opening));
   const [date, setDate] = useState(initial.openingDate ?? "");
+  const [oprice, setOprice] = useState(initial.openingPrice === null ? "" : String(initial.openingPrice));
   const [err, setErr] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ n: number; text: string } | null>(null);
@@ -36,15 +37,17 @@ export function TankForm({ initial }: { initial: Initial }) {
     setError(null);
     const c = num(cap),
       l = num(low),
-      o = num(opening);
+      o = num(opening),
+      op = num(oprice);
     const local: Record<string, string> = {};
     if (Number.isNaN(c)) local.capacity = "ใส่เป็นตัวเลข";
     if (Number.isNaN(l)) local.low = "ใส่เป็นตัวเลข";
     if (o === null || Number.isNaN(o)) local.opening = "ใส่ยอดยกมาเป็นตัวเลข (ไม่มีให้ใส่ 0)";
+    if (Number.isNaN(op)) local.openingPrice = "ใส่เป็นตัวเลข";
     if (Object.keys(local).length) return setErr(local);
     start(async () => {
       try {
-        const r = await saveTankAction({ capacity: c, low: l, opening: o, openingDate: date || null });
+        const r = await saveTankAction({ capacity: c, low: l, opening: o, openingDate: date || null, openingPrice: op });
         if (r.ok) {
           setErr({});
           setDone((d) => ({ n: (d?.n ?? 0) + 1, text: r.message ?? "บันทึกแล้ว" }));
@@ -63,6 +66,7 @@ export function TankForm({ initial }: { initial: Initial }) {
     setLow(initial.low === null ? "" : String(initial.low));
     setOpening(String(initial.opening));
     setDate(initial.openingDate ?? "");
+    setOprice(initial.openingPrice === null ? "" : String(initial.openingPrice));
     setErr({});
     setError(null);
   }
@@ -97,6 +101,10 @@ export function TankForm({ initial }: { initial: Initial }) {
                   {formatLiters(initial.opening)} ลิตร{initial.openingDate ? ` (${thaiShort(initial.openingDate)})` : ""}
                 </dd>
               </div>
+              <div className="flex flex-col gap-0.5">
+                <dt className="text-sm text-muted">ราคาของยอดยกมา</dt>{" "}
+                <dd>{initial.openingPrice === null ? (initial.opening > 0 ? "ยังไม่ได้ตั้ง ใบจ่ายที่ใช้น้ำมันส่วนนี้จะรอราคา" : "ไม่มียอดยกมา") : `${formatBaht(initial.openingPrice)} บาท/ลิตร`}</dd>
+              </div>
             </dl>
           </Card>
         </div>
@@ -123,6 +131,16 @@ export function TankForm({ initial }: { initial: Initial }) {
                 value={opening}
                 disabled={initial.openingLocked}
                 onChange={(e) => (setOpening(e.target.value), clear("opening"))}
+              />
+            </Field>
+            <Field label="ราคาของยอดยกมา (บาท/ลิตร)" htmlFor="st-oprice" error={err.openingPrice} hint="น้ำมันที่มีอยู่ในรถตอนเริ่มใช้ถูกจ่ายออกก่อนบิลซื้อใบแรก จึงต้องมีราคาของตัวเอง">
+              <input
+                id="st-oprice"
+                className={`${fieldClass} ${bad("openingPrice")} ${off}`}
+                inputMode="decimal"
+                value={oprice}
+                disabled={initial.openingLocked}
+                onChange={(e) => (setOprice(e.target.value), clear("openingPrice"))}
               />
             </Field>
             <Field label="วันเริ่มใช้ (วันที่ของยอดยกมา)" htmlFor="st-date">

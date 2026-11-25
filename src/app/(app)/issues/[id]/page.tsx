@@ -54,7 +54,7 @@ export default async function IssueDetail({
   const d = await getIssue(session, id);
   if (!d) notFound();
   const { saved, photo } = await searchParams;
-  const { head, lines, audit, bill } = d;
+  const { head, lines, audit, parts } = d;
   const lock = changeLock({ cancelled: head.cancelledAt !== null, closedCycleLabel: d.closedCycleLabel });
   const writer = canWriteFuel(session);
 
@@ -64,7 +64,17 @@ export default async function IssueDetail({
   const stock = !head.cancelledAt && canOpen(session.role, "/ledger") ? await stockOn(head.issueDate) : null;
   const total = sumLiters(lines.map((l) => l.liters));
   const money = sumAmounts(lines.map((l) => l.amount ?? 0));
-  const price = lines.find((l) => l.pricePerLiter !== null)?.pricePerLiter ?? null;
+  // one price for the whole slip, or it is split over bills (brief §14 B3) and the rows under each line say how
+  const prices = [...new Set(parts.map((p) => p.price))];
+  const onePrice = prices.length === 1 && prices[0] !== null ? prices[0] : null;
+  const source = (p: (typeof parts)[number]) =>
+    p.kind === "none"
+      ? "ยังไม่มีบิลซื้อรองรับ"
+      : p.kind === "opening"
+        ? "ยอดยกมาในรถ"
+        : p.bill
+          ? `บิลซื้อวันที่ ${thaiShort(p.bill.date)}${p.bill.time ? ` ${p.bill.time} น.` : ""}${p.bill.billNo ? ` เลขที่ ${p.bill.billNo}` : ""}${p.bill.pending ? " (รอผู้ดูแลยืนยันบิล)" : ""}`
+          : "บิลซื้อ";
   const label = `เล่มที่ ${head.bookNo} เลขที่ ${head.docNo}`;
 
   // one status per worry, same words as the list; nothing to follow up = ปกติ
@@ -178,13 +188,23 @@ export default async function IssueDetail({
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={3}>{pending ? `รวม ยังไม่มีบิลซื้อก่อนวันที่ ${thaiShort(head.issueDate)}` : `รวม ราคา ${formatBaht(price ?? 0)} บาท/ลิตร ${bill ? `ตามบิลซื้อวันที่ ${thaiShort(bill.date)}${bill.billNo ? ` เลขที่ ${bill.billNo}` : ""}` : `ของวันที่ ${thaiShort(head.issueDate)}`}`}</td>
+                    <td colSpan={3}>{pending ? "รวม มีลิตรที่ยังรอราคา" : onePrice !== null ? `รวม ราคา ${formatBaht(onePrice)} บาท/ลิตร` : "รวม คิดตามราคาของแต่ละบิล"}</td>
                     <td className="n">{formatLiters(total)}</td>
                     <td className="n">{pending ? "รอราคา" : formatBaht(money)}</td>
                   </tr>
                 </tfoot>
               </table>
             </div>
+            {parts.length > 0 && (
+              <div data-testid="price-parts" className="flex flex-col gap-1 text-[14px] text-muted">
+                <span className="text-ink">ราคามาจาก (น้ำมันที่เข้าก่อนถูกใช้ก่อน)</span>
+                {parts.map((p, i) => (
+                  <span key={i}>
+                    ลำดับ {p.position}: {formatLiters(p.liters)} ลิตร {p.price === null ? "รอราคา" : `× ${formatBaht(p.price)} = ${formatBaht(p.amount ?? 0)} บาท`} · {source(p)}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </Card>
 

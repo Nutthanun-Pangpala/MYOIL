@@ -41,7 +41,7 @@ export function InvoiceSheet({ inv, links = true }: { inv: InvoiceDetail; links?
         </thead>
         <tbody>
           {inv.lines.map((l, i) => (
-            <tr key={l.slipId} className="align-top">
+            <tr key={`${l.slipId}-${l.part}`} className="align-top">
               <td className="num border border-ink px-2 py-1.5 text-right">{i + 1}</td>
               <td className="border border-ink px-2 py-1.5">{thaiShort(l.date)}</td>
               <td className="border border-ink px-2 py-1.5">{l.bookNo}</td>

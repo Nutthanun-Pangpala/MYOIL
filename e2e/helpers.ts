@@ -35,7 +35,12 @@ export async function keyIssue(
   await page.getByLabel("รายการหรือรหัสเครื่องจักร").first().fill(s.machine);
   await page.getByLabel("จำนวนน้ำมัน (ลิตร)").first().fill(s.liters);
   await page.getByRole("button", { name: "บันทึก", exact: true }).click();
-  await expect(page).toHaveURL(/\/issues\/[0-9a-f-]{36}/);
+  // a slip that moves the money of later slips (oldest fuel first) is asked about first: say yes
+  const yes = page.getByRole("button", { name: "ยืนยันบันทึก" });
+  const saved = /\/issues\/[0-9a-f-]{36}/;
+  await expect(async () => expect(saved.test(page.url()) || (await yes.count()) > 0).toBe(true)).toPass();
+  if (!saved.test(page.url())) await yes.click();
+  await expect(page).toHaveURL(saved);
 }
 
 /** record a purchase in the side panel of /purchases (liters + price are enough, the amount fills itself) */
@@ -47,10 +52,17 @@ export async function recordPurchase(page: Page, p: { date: string; liters: stri
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill(p.price);
   if (p.billNo) await form.getByLabel(/เลขที่บิล/).fill(p.billNo);
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
-  // a bill that prices or reprices open slips says so and waits for "รับทราบ"; otherwise the form closes by itself
+  // a bill that would change the money of slips already priced asks first ("ยืนยันบันทึก", brief §14 B5);
+  // one that prices or reprices open slips says so and waits for "รับทราบ"; otherwise the form closes by itself
   const month = new RegExp(`/purchases\\?month=${p.date.slice(0, 7)}$`);
   const note = form.getByRole("status");
-  await expect(async () => expect((await note.count()) > 0 || month.test(page.url())).toBe(true)).toPass();
+  const yes = form.getByRole("button", { name: "ยืนยันบันทึก" });
+  const settled = async () => (await note.count()) > 0 || month.test(page.url());
+  await expect(async () => expect((await settled()) || (await yes.count()) > 0).toBe(true)).toPass();
+  if (!(await settled())) {
+    await yes.click();
+    await expect(async () => expect(await settled()).toBe(true)).toPass();
+  }
   if (!month.test(page.url())) await form.getByRole("button", { name: "รับทราบ" }).click();
   await expect(page).toHaveURL(month);
 }

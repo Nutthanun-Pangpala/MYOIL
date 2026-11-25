@@ -3,12 +3,11 @@ import { db, schema } from "@/db";
 import { appBookNo, appDocNo, purchaseFlags, type IssueRequest, type PurchaseRequest, type SignatureRequest } from "@/domain/bookcare-api";
 import { dayAfter } from "@/domain/cycle";
 import { machineKey } from "@/domain/issue-check";
-import { lineAmount, sumLiters } from "@/domain/money";
+import { sumLiters } from "@/domain/money";
 import { completePurchase } from "@/domain/purchase-calc";
 import { cycleIdFor } from "../cycles/cycle-service";
 import { stockOn, tankCapacity } from "../ledger/ledger-service";
-import { billForDate, priceForDate } from "../prices/price-queries";
-import { repriceOpenLines } from "../purchases/purchase-service";
+import { repriceOpenLines } from "../prices/fifo-service";
 import { contentHash, decodeImage, type DecodedImage } from "./images";
 import { checkStopForIssue, fillStop, stopForIssue } from "../routes/route-service";
 
@@ -78,8 +77,6 @@ export async function receiveIssue(req: IssueRequest): Promise<Done<IssueAnswer>
   if (prior) return prior.requestHash === hash ? { ok: true, status: 200, body: issueAnswer(prior, true) } : fail(409, "ref_conflict", "ref นี้เคยส่งมาแล้วด้วยเนื้อหาอื่น");
   if (!proj) return fail(404, "unknown_project", `ไม่พบโครงการ ${req.projectRefCode} ใน MYOIL`, "projectRefCode");
 
-  const bill = await billForDate(req.issueDate); // the purchase bill this slip takes its price from
-  const price = bill?.pricePerLiter ?? null;
   const total = sumLiters(req.lines.map((l) => l.liters));
   const before = (await stockOn(req.issueDate)).liters;
   const botId = await bookcareUserId();
@@ -158,7 +155,6 @@ export async function receiveIssue(req: IssueRequest): Promise<Done<IssueAnswer>
           flags,
           confirmedWarnings: req.confirmedWarnings,
           routeStopId: req.routeStopId,
-          pricePurchaseId: bill?.id ?? null,
         })
         .returning();
       await fillStop(tx, req.routeStopId!, issue.id);
@@ -172,8 +168,8 @@ export async function receiveIssue(req: IssueRequest): Promise<Done<IssueAnswer>
             machineId: machineIds[i],
             hourMeter: l.hourMeter,
             liters: l.liters,
-            pricePerLiter: price,
-            amount: price === null ? null : lineAmount(l.liters, price),
+            pricePerLiter: null, // set below: oldest fuel first (brief §14)
+            amount: null,
           })),
         )
         .returning({ id: fuelIssueLines.id, position: fuelIssueLines.position });
@@ -183,6 +179,7 @@ export async function receiveIssue(req: IssueRequest): Promise<Done<IssueAnswer>
       }
       if (signature) await tx.insert(issueSignedPhotos).values({ issueId: issue.id, mime: signature.mime, data: signature.data, uploadedBy: botId });
       await tx.insert(fuelIssueAudit).values({ issueId: issue.id, userId: botId, action: "create", changes: null });
+      await repriceOpenLines(tx); // its money: oldest fuel first (brief §14)
       return { ok: true, status: 201, body: issueAnswer(issue, false) };
     });
   } catch (e) {
@@ -205,7 +202,7 @@ export async function receivePurchase(req: PurchaseRequest): Promise<Done<Purcha
 
   const calc = completePurchase({ liters: req.liters, price: null, amount: req.amount });
   if (!calc.ok) return fail(400, "invalid", calc.error, calc.field ?? "amount");
-  const flags = purchaseFlags({ liters: calc.liters, price: calc.price, dailyPrice: await priceForDate(req.purchaseDate), capacity: await tankCapacity() });
+  const flags = purchaseFlags({ liters: calc.liters, price: calc.price, dailyPrice: null, capacity: await tankCapacity() });
   const botId = await bookcareUserId();
 
   try {
@@ -220,6 +217,8 @@ export async function receivePurchase(req: PurchaseRequest): Promise<Done<Purcha
         .insert(fuelPurchases)
         .values({
           purchaseDate: req.purchaseDate,
+          // the time the driver recorded it stands for the time on the bill (B9); the admin can correct it when confirming
+          purchaseTime: new Date((req.recordedAt ? new Date(req.recordedAt) : new Date()).getTime() + 7 * 3_600_000).toISOString().slice(11, 16),
           liters: calc.liters,
           pricePerLiter: calc.price,
           amount: calc.amount,
@@ -237,7 +236,7 @@ export async function receivePurchase(req: PurchaseRequest): Promise<Done<Purcha
         .returning();
       await tx.insert(purchaseBillPhotos).values({ purchaseId: row.id, mime: photo.image.mime, data: photo.image.data });
       await tx.insert(purchaseAudit).values({ purchaseId: row.id, userId: botId, action: "create", changes: null });
-      await repriceOpenLines(tx); // the driver's bill is a price at once (owner, 25 Nov 2026): open slips dated on or after it follow
+      await repriceOpenLines(tx); // B6: its liters join the queue now, its price only once an admin confirms — slips drawing on it show "รอราคา" until then
       return { ok: true, status: 201, body: purchaseAnswer(row, false) };
     });
   } catch (e) {

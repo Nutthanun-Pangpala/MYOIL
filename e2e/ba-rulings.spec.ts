@@ -73,7 +73,7 @@ test("OBS-13: a signed slip with no price blocks closing the cycle until the day
   await page.goto("/invoices");
   await page.getByRole("button", { name: /^ปิดรอบ/ }).click();
   await page.getByRole("region", { name: /^ปิดรอบ/ }).getByRole("button", { name: /^ปิดรอบ/ }).click();
-  await expect(page.getByText(/ปิดรอบไม่ได้ มีใบที่เซ็นรับแล้วแต่ยังไม่มีราคา 1 ใบ/)).toBeVisible();
+  await expect(page.getByText(/ปิดรอบไม่ได้ มีใบที่เซ็นรับแล้วแต่ยังรอราคา 1 ใบ/)).toBeVisible();
 
   // record the purchase bill of that day (the slip takes its price), then closing works
   await recordPurchase(page, { date: "2026-01-15", liters: "1000", price: "30" });
