@@ -12,6 +12,12 @@ describe("navFor", () => {
     expect(navFor("project_viewer").map((n) => n.label).includes("สมุดคงเหลือ")).toBe(false);
   });
   it("system_admin sees everything", () => {
-    expect(navFor("system_admin").length).toBe(8);
+    expect(navFor("system_admin").length).toBe(10);
+  });
+  it("only the office checks phone slips; everyone may open the machine report", () => {
+    expect(navFor("executive").map((n) => n.label).includes("ตรวจใบมือถือ")).toBe(false);
+    expect(navFor("project_viewer").map((n) => n.label).includes("ตรวจใบมือถือ")).toBe(false);
+    expect(navFor("store_admin").map((n) => n.label).includes("ตรวจใบมือถือ")).toBe(true);
+    expect(navFor("project_viewer").map((n) => n.label).includes("รายงานเครื่องจักร")).toBe(true);
   });
 });

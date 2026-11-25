@@ -4,13 +4,13 @@ import "./globals.css";
 
 const plex = IBM_Plex_Sans_Thai({
   subsets: ["thai", "latin"],
-  weight: ["400", "600"],
+  weight: ["400", "500", "600"],
   variable: "--font-plex",
 });
 
 const kanit = Kanit({
   subsets: ["thai", "latin"],
-  weight: ["500", "600"],
+  weight: ["400", "500", "600"],
   variable: "--font-kanit",
 });
 

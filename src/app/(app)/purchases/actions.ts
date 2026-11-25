@@ -2,24 +2,17 @@
 
 import { revalidatePath } from "next/cache";
 import { requireWriter } from "@/lib/session";
-import { parsePriceInput, parsePurchaseInput } from "@/server/purchases/parse-input";
-import { cancelPurchase, confirmPurchase, createPurchase, restorePurchase, setDailyPrice, updatePurchase, type ChangeResult, type SaveResult } from "@/server/purchases/purchase-service";
+import { parsePurchaseInput } from "@/server/purchases/parse-input";
+import { cancelPurchase, confirmPurchase, createPurchase, restorePurchase, updatePurchase, type ChangeResult, type SaveResult } from "@/server/purchases/purchase-service";
 
 function refresh() {
-  // purchases move the book and may price waiting slips
+  // purchases move the book and price the slips that draw on them
   for (const p of ["/purchases", "/issues", "/ledger", "/monthly", "/invoices"]) revalidatePath(p);
 }
 
 export async function savePurchaseAction(raw: unknown): Promise<SaveResult> {
   const session = await requireWriter();
   const r = await createPurchase(session, parsePurchaseInput(raw));
-  if (r.ok) refresh();
-  return r;
-}
-
-export async function savePriceAction(raw: unknown): Promise<SaveResult> {
-  const session = await requireWriter();
-  const r = await setDailyPrice(session, parsePriceInput(raw));
   if (r.ok) refresh();
   return r;
 }

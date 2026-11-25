@@ -19,4 +19,7 @@ describe("priceOn", () => {
     expect(priceOn(prices, "2026-10-31")).toBeNull();
     expect(priceOn([], "2026-11-01")).toBeNull();
   });
+  it("takes the later entry of two on the same day (the bill recorded last)", () => {
+    expect(priceOn([{ date: "2026-11-03", pricePerLiter: 32.1 }, { date: "2026-11-03", pricePerLiter: 32.4 }], "2026-11-04")).toBe(32.4);
+  });
 });

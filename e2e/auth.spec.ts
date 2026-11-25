@@ -20,6 +20,23 @@ test("a wrong password is refused with a message", async ({ page }) => {
   await page.getByRole("button", { name: "เข้าสู่ระบบ" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" })).toBeVisible();
   await expect(page).toHaveURL(/\/login/);
+  // the email stays, the password is to be typed again
+  await expect(page.getByLabel("อีเมล")).toHaveValue("store@myoil.local");
+  await expect(page.getByLabel("รหัสผ่าน")).toHaveValue("");
+  await expect(page.getByLabel("รหัสผ่าน")).toBeFocused();
+});
+
+test("login page: email has the cursor, the password can be shown and hidden", async ({ page }) => {
+  await page.goto("/login");
+  await expect(page.getByLabel("อีเมล")).toBeFocused();
+  const pw = page.getByLabel("รหัสผ่าน");
+  await pw.fill("abc123");
+  await expect(pw).toHaveAttribute("type", "password");
+  await page.getByRole("button", { name: "แสดง" }).click();
+  await expect(pw).toHaveAttribute("type", "text");
+  await expect(pw).toHaveValue("abc123");
+  await page.getByRole("button", { name: "ซ่อน" }).click();
+  await expect(pw).toHaveAttribute("type", "password");
 });
 
 test("a visitor who is not signed in is sent to the login page", async ({ page }) => {

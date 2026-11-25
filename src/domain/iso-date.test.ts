@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addDays, isMonth, monthOf, monthRange, shiftMonth, isIsoDate } from "./iso-date";
+import { addDays, isMonth, monthOf, monthRange, monthUpTo, shiftMonth, isIsoDate } from "./iso-date";
 
 describe("iso-date", () => {
   it("adds days across month and year ends", () => {
@@ -15,6 +15,16 @@ describe("iso-date", () => {
     expect(shiftMonth("2026-01", -1)).toBe("2025-12");
     expect(shiftMonth("2026-11", 2)).toBe("2027-01");
     expect(shiftMonth("2026-11", 0)).toBe("2026-11");
+  });
+  // BUG-05 (test round 10): the overview says "นับถึงวันนี้", so a slip dated later this month is not counted yet
+  it("monthUpTo stops at today in this month, takes a past month whole", () => {
+    expect(monthUpTo("2026-11", "2026-11-24")).toEqual({ start: "2026-11-01", end: "2026-11-24" });
+    expect(monthUpTo("2026-10", "2026-11-24")).toEqual({ start: "2026-10-01", end: "2026-10-31" });
+    expect(monthUpTo("2026-11", "2026-11-30")).toEqual({ start: "2026-11-01", end: "2026-11-30" });
+  });
+  it("monthUpTo of a month that has not started is empty (ends before it starts)", () => {
+    const r = monthUpTo("2026-12", "2026-11-24");
+    expect(r.end < r.start).toBe(true);
   });
   it("monthOf / isMonth", () => {
     expect(monthOf("2026-11-17")).toBe("2026-11");

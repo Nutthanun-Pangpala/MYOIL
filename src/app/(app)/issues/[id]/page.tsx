@@ -1,23 +1,23 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Card, Pill } from "@/components/ui";
+import { Toast } from "@/components/toast";
+import { Card, CardTitle, Notice, PageHeader, Pill, ProjectChip, type Tone } from "@/components/ui";
+import { changeLock } from "@/domain/issue-actions";
 import { sumAmounts, sumLiters } from "@/domain/money";
 import { thaiShort } from "@/domain/thai-date";
-import { formatBaht, formatLiters } from "@/lib/format";
-import { requireUser } from "@/lib/session";
-import { canWriteFuel } from "@/lib/permissions";
-import { changeLock } from "@/domain/issue-actions";
-import { getIssue } from "@/server/issues/issue-service";
-import { stockOn } from "@/server/ledger/ledger-service";
+import { formatBaht, formatLiters, formatStamp } from "@/lib/format";
 import { canOpen } from "@/lib/nav";
-import { IssueActionsPanel } from "./issue-actions-panel";
-import { SignedPhotoCard } from "./signed-photo-card";
-import { ReviewCard } from "./review-card";
+import { canWriteFuel } from "@/lib/permissions";
+import { requireUser } from "@/lib/session";
+import { getIssue } from "@/server/issues/issue-service";
 import { getReview } from "@/server/issues/review-service";
+import { stockOn } from "@/server/ledger/ledger-service";
+import { IssueActions } from "./issue-actions";
+import { ReviewCard } from "./review-card";
+import { SignedPhotoCard } from "./signed-photo-card";
 
 export const metadata = { title: "รายละเอียดใบจ่าย" };
 
-const ACTION: Record<string, string> = { create: "บันทึกใบ", update: "แก้ไข", cancel: "ยกเลิกใบ", restore: "นำกลับมา" };
+const ACTION: Record<string, string> = { create: "บันทึกใบจ่าย", update: "แก้ไข", cancel: "ยกเลิกใบ", restore: "นำกลับมา" };
 const FIELD: Record<string, string> = {
   bookNo: "เล่มที่",
   docNo: "เลขที่",
@@ -33,14 +33,14 @@ const FIELD: Record<string, string> = {
   machine: "เครื่องจักร",
 };
 const show = (v: unknown) => (v === true ? "เซ็นแล้ว" : v === false ? "ยังไม่เซ็น" : v === null || v === "" ? "-" : String(v));
-function describe(changes: unknown): string {
-  if (!changes || typeof changes !== "object") return "";
+function describe(changes: unknown): string[] {
+  if (!changes || typeof changes !== "object") return [];
   return Object.entries(changes as Record<string, [unknown, unknown]>)
     .filter(([k]) => k !== "projectId")
-    .map(([k, v]) => `${FIELD[k] ?? k}: ${show(v?.[0])} → ${show(v?.[1])}`)
-    .join(" · ");
+    .map(([k, v]) => `${FIELD[k] ?? k}: ${show(v?.[0])} → ${show(v?.[1])}`);
 }
 
+/** design 6.5 */
 export default async function IssueDetail({
   params,
   searchParams,
@@ -54,8 +54,9 @@ export default async function IssueDetail({
   const d = await getIssue(session, id);
   if (!d) notFound();
   const { saved, photo } = await searchParams;
-  const { head, lines, audit } = d;
+  const { head, lines, audit, bill } = d;
   const lock = changeLock({ cancelled: head.cancelledAt !== null, closedCycleLabel: d.closedCycleLabel });
+  const writer = canWriteFuel(session);
 
   const review = await getReview(head.id);
   const pending = lines.some((l) => l.amount === null);
@@ -63,132 +64,175 @@ export default async function IssueDetail({
   const stock = !head.cancelledAt && canOpen(session.role, "/ledger") ? await stockOn(head.issueDate) : null;
   const total = sumLiters(lines.map((l) => l.liters));
   const money = sumAmounts(lines.map((l) => l.amount ?? 0));
+  const price = lines.find((l) => l.pricePerLiter !== null)?.pricePerLiter ?? null;
+  const label = `เล่มที่ ${head.bookNo} เลขที่ ${head.docNo}`;
+
+  // one status per worry, same words as the list; nothing to follow up = ปกติ
+  const pills: { tone: Tone; text: string }[] = [];
+  if (head.cancelledAt) pills.push({ tone: "off", text: "ยกเลิก" });
+  else {
+    if (!head.receivedSigned) pills.push({ tone: "wait", text: "ยังไม่เซ็นรับ" });
+    if (review?.status === "pending_review") pills.push({ tone: "wait", text: "รอตรวจ" });
+    if (pending) pills.push({ tone: "wait", text: "รอราคา" });
+    if (d.closedCycleLabel && head.receivedSigned && head.reviewStatus === "checked" && !pending) pills.push({ tone: "ok", text: "อยู่ในใบแจ้งแล้ว" });
+    if (pills.length === 0) pills.push({ tone: "ok", text: "ปกติ" });
+  }
+
+  const info: [string, React.ReactNode][] = [
+    ["วันที่", thaiShort(head.issueDate)],
+    [
+      "โครงการ",
+      <span key="p" className="flex flex-wrap items-center gap-2">
+        <ProjectChip code={head.projectRef} name={head.projectName} />
+        <span className="text-sm text-muted">{head.projectName}</span>
+      </span>,
+    ],
+    ["เวลาเข้า และ เวลาออก", head.timeIn || head.timeOut ? `${head.timeIn ?? "-"} ถึง ${head.timeOut ?? "-"}` : "-"],
+    ["พขร.เติมน้ำมัน", head.fuelDriver ?? "-"],
+    ["พขร.ดูแลเครื่องจักร", head.machineDriver ?? "-"],
+    [
+      "ผู้เซ็นรับ",
+      head.receivedSigned ? (
+        <span key="s">
+          <span>{head.receiverName ?? "-"}</span> <span className="text-muted">ใบกระดาษมีลายเซ็นแล้ว</span>
+        </span>
+      ) : (
+        "ยังไม่เซ็น"
+      ),
+    ],
+    ["คีย์โดย", head.source === "mobile" ? "มือถือของ พขร. (BookCare)" : head.recordedByName],
+  ];
 
   return (
-    <div className="flex max-w-4xl flex-col gap-5">
-      <Link href="/issues" className="text-[14px] text-earth underline">
-        กลับไปรายการใบจ่าย
-      </Link>
-      {saved && (
-        <p role="status" className="rounded-control bg-working-soft px-3 py-2 text-[14px] text-working">
-          บันทึกแล้ว
-        </p>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <h1 className="font-display text-2xl text-earth">
-          เล่มที่ {head.bookNo} เลขที่ {head.docNo}
-        </h1>
-        {head.cancelledAt && <Pill tone="bad">ยกเลิก</Pill>}
-        {!head.cancelledAt && !head.receivedSigned && <Pill tone="wait">ยังไม่เซ็นรับ</Pill>}
-        {!head.cancelledAt && review?.status === "pending_review" && <Pill tone="wait">รอตรวจ</Pill>}
-        {!head.cancelledAt && pending && <Pill tone="wait">รอราคา</Pill>}
-      </div>
-
-      {stock && stock.liters < 0 && (
-        <p role="note" className="rounded-control bg-safety-soft px-3 py-2 text-[14px]">
-          คำเตือน: ยอดคงเหลือสิ้นวันที่ {thaiShort(head.issueDate)} ติดลบ {formatLiters(stock.liters)} ลิตร ตรวจว่าบันทึกซื้อน้ำมันเข้าครบหรือยัง ใบนี้บันทึกไว้แล้วตามใบกระดาษ
-        </p>
-      )}
-
-      {head.cancelledAt && (
-        <p className="rounded-control bg-repair-soft px-3 py-2 text-[14px] text-repair">
-          ยกเลิกแล้ว — เหตุผล: {head.cancelReason ?? "-"}
-        </p>
-      )}
-      {canWriteFuel(session) && <IssueActionsPanel id={head.id} cancelled={head.cancelledAt !== null} signed={head.receivedSigned} lock={lock} />}
-
-      {review && (
-        <ReviewCard
-          id={head.id}
-          status={review.status}
-          canEdit={canWriteFuel(session) && !head.cancelledAt}
-          lock={lock}
-          flags={review.flags}
-          confirmedWarnings={review.confirmedWarnings}
-          driverName={review.driverName}
-          recordedAt={review.recordedAt}
-          receivedAt={review.receivedAt}
-          unsignedReason={review.unsignedReason}
-          reviewedBy={review.reviewedBy}
-          reviewedAt={review.reviewedAt}
-          editedAfterSign={review.editedAfterSign}
-          lines={review.lines.map((l) => ({ ...l, liters: formatLiters(l.liters), hourMeter: l.hourMeter === null ? "" : String(l.hourMeter) }))}
-          knownMachines={review.knownMachines}
-        />
-      )}
-
-      <Card className="grid gap-4 p-5 sm:grid-cols-2">
-        {[
-          ["วันที่", thaiShort(head.issueDate)],
-          ["โครงการ", `${head.projectRef} — ${head.projectName}`],
-          ["เวลาเข้า – ออก", head.timeIn || head.timeOut ? `${head.timeIn ?? "-"} – ${head.timeOut ?? "-"}` : "-"],
-          ["พขร.เติมน้ำมัน", head.fuelDriver ?? "-"],
-          ["พขร.ดูแลเครื่องจักร", head.machineDriver ?? "-"],
-          ["ผู้เซ็นรับ", head.receivedSigned ? (head.receiverName ?? "-") : "ยังไม่เซ็น"],
-          ["คีย์โดย", head.recordedByName],
-        ].map(([k, v]) => (
-          <div key={k}>
-            <div className="text-[13px] text-muted">{k}</div>
-            <div>{v}</div>
-          </div>
-        ))}
-      </Card>
-
-      <Card className="overflow-x-auto p-2">
-        <table className="w-full border-collapse text-[14px]">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="px-3 py-2.5 font-medium">ลำดับ</th>
-              <th className="px-3 py-2.5 font-medium">รายการ/รหัสเครื่องจักร</th>
-              <th className="px-3 py-2.5 text-right font-medium">ชั่วโมงทำงาน</th>
-              <th className="px-3 py-2.5 text-right font-medium">ลิตร</th>
-              <th className="px-3 py-2.5 text-right font-medium">บาท/ลิตร</th>
-              <th className="px-3 py-2.5 text-right font-medium">จำนวนเงิน</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((l) => (
-              <tr key={l.position} className="border-t border-line">
-                <td className="px-3 py-3">{l.position}</td>
-                <td className="px-3 py-3">{l.machine}</td>
-                <td className="num px-3 py-3">{l.hourMeter ?? "-"}</td>
-                <td className="num px-3 py-3">{formatLiters(l.liters)}</td>
-                <td className="num px-3 py-3">{l.pricePerLiter === null ? "รอราคา" : formatBaht(l.pricePerLiter)}</td>
-                <td className="num px-3 py-3">{l.amount === null ? "รอราคา" : formatBaht(l.amount)}</td>
-              </tr>
+    <>
+      <PageHeader
+        title={`ใบจ่าย ${label}`}
+        back={{ href: "/issues", label: "กลับไปรายการใบจ่าย" }}
+        actions={
+          <>
+            {pills.map((p) => (
+              <Pill key={p.text} tone={p.tone}>
+                {p.text}
+              </Pill>
             ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t-2 border-ink font-semibold">
-              <td className="px-3 py-3" colSpan={3}>
-                รวม
-              </td>
-              <td className="num px-3 py-3">
-                <span className="rounded bg-safety-soft px-1.5">{formatLiters(total)}</span>
-              </td>
-              <td />
-              <td className="num px-3 py-3">{pending ? "รอราคา" : formatBaht(money)}</td>
-            </tr>
-          </tfoot>
-        </table>
-      </Card>
+            {writer && (
+              <IssueActions
+                id={head.id}
+                label={label}
+                cancelled={head.cancelledAt !== null}
+                signed={head.receivedSigned}
+                locked={!!lock}
+                liters={formatLiters(total)}
+                dateText={thaiShort(head.issueDate)}
+              />
+            )}
+          </>
+        }
+      />
+      {saved && <Toast>บันทึกแล้ว {label}</Toast>}
 
-      <SignedPhotoCard id={head.id} photoAt={d.photoAt} canEdit={canWriteFuel(session) && head.cancelledAt === null} lock={lock} failedOnSave={photo === "failed"} />
+      {head.cancelledAt && <p className="rounded-control bg-gray-soft px-3.5 py-3 text-gray-ink">ยกเลิกแล้ว — เหตุผล: {head.cancelReason ?? "-"}</p>}
+      {writer && lock && !head.cancelledAt && (
+        <p className="text-sm text-muted" data-testid="lock-note">
+          {lock}
+        </p>
+      )}
+      {stock && stock.liters < 0 && (
+        <Notice>
+          คำเตือน: ยอดคงเหลือสิ้นวันที่ {thaiShort(head.issueDate)} ติดลบ {formatLiters(stock.liters)} ลิตร ตรวจว่าบันทึกซื้อน้ำมันเข้าครบหรือยัง ใบนี้บันทึกไว้แล้วตามใบกระดาษ
+        </Notice>
+      )}
 
-      <Card className="p-5 text-[14px] text-muted">รูปมิเตอร์และลายเซ็นบนจอ จะแสดงที่นี่ (ขั้นที่ 2)</Card>
+      <div className="flex flex-col items-stretch gap-6 lg:flex-row lg:items-start">
+        <Card className="min-w-0 flex-[999_1_620px] p-6">
+          <div className="flex flex-col gap-5">
+            <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(180px,100%),1fr))] gap-x-6 gap-y-4">
+              {info.map(([k, v]) => (
+                <div key={k} className="flex flex-col gap-0.5">
+                  <dt className="text-sm text-muted">{k}</dt>
+                  <dd>{v}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="overflow-x-auto">
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>ลำดับ</th>
+                    <th>รายการหรือรหัสเครื่องจักร</th>
+                    <th className="n">ชั่วโมงการทำงาน</th>
+                    <th className="n">ลิตร</th>
+                    <th className="n">ยอดเงิน (บาท)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((l) => (
+                    <tr key={l.position}>
+                      <td>{l.position}</td>
+                      <td>{l.machine}</td>
+                      <td className="n">{l.hourMeter ?? "–"}</td>
+                      <td className="n">{formatLiters(l.liters)}</td>
+                      <td className="n">{l.amount === null ? "รอราคา" : formatBaht(l.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={3}>{pending ? `รวม ยังไม่มีบิลซื้อก่อนวันที่ ${thaiShort(head.issueDate)}` : `รวม ราคา ${formatBaht(price ?? 0)} บาท/ลิตร ${bill ? `ตามบิลซื้อวันที่ ${thaiShort(bill.date)}${bill.billNo ? ` เลขที่ ${bill.billNo}` : ""}` : `ของวันที่ ${thaiShort(head.issueDate)}`}`}</td>
+                    <td className="n">{formatLiters(total)}</td>
+                    <td className="n">{pending ? "รอราคา" : formatBaht(money)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </Card>
 
-      <Card className="p-5">
-        <h2 className="mb-3 font-display text-lg text-earth">ประวัติการแก้ไข</h2>
-        <ul className="flex flex-col gap-1 text-[14px]">
-          {audit.map((a, i) => (
-            <li key={i}>
-              {ACTION[a.action] ?? a.action} · {a.userName ?? "-"} · {a.at.toLocaleString("th-TH", { timeZone: "Asia/Bangkok" })}
-              {describe(a.changes) && <span className="block text-[13px] text-muted">{describe(a.changes)}</span>}
-            </li>
-          ))}
-        </ul>
-      </Card>
-    </div>
+        <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-4">
+          <SignedPhotoCard id={head.id} photoAt={d.photoAt} canEdit={writer && head.cancelledAt === null} lock={lock} failedOnSave={photo === "failed"} />
+
+          {review && (
+            <ReviewCard
+              id={head.id}
+              status={review.status}
+              canEdit={writer && !head.cancelledAt}
+              lock={lock}
+              flags={review.flags}
+              confirmedWarnings={review.confirmedWarnings}
+              driverName={review.driverName}
+              recordedAt={review.recordedAt}
+              receivedAt={review.receivedAt}
+              unsignedReason={review.unsignedReason}
+              reviewedBy={review.reviewedBy}
+              reviewedAt={review.reviewedAt}
+              editedAfterSign={review.editedAfterSign}
+              lines={review.lines.map((l) => ({ ...l, liters: formatLiters(l.liters), hourMeter: l.hourMeter === null ? "" : String(l.hourMeter) }))}
+              knownMachines={review.knownMachines}
+            />
+          )}
+
+          <Card className="p-5">
+            <div className="flex flex-col gap-3">
+              <CardTitle>ประวัติการแก้ไข</CardTitle>
+              <ol aria-label="ประวัติการแก้ไข" className="flex flex-col gap-3">
+                {audit.map((a, i) => (
+                  <li key={i} className="flex flex-col gap-0.5">
+                    <span className="text-[13px] text-muted">
+                      {formatStamp(a.at)} โดย {a.userName ?? "-"}
+                    </span>
+                    <span>{ACTION[a.action] ?? a.action}</span>
+                    {describe(a.changes).map((t) => (
+                      <span key={t} className="text-sm text-muted">
+                        {t}
+                      </span>
+                    ))}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </Card>
+        </div>
+      </div>
+    </>
   );
 }

@@ -22,9 +22,10 @@ test("projects are read-only and searchable", async ({ page }) => {
   await login(page, "admin");
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings\/projects/);
+  // design 6.11: the list filters as you type, no search button
   await page.getByLabel("ค้นหาโครงการ").fill("DEMO1");
-  await page.getByRole("button", { name: "ค้นหา" }).click();
   await expect(page.getByRole("row").filter({ hasText: "DEMO1" })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "DEMO2" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /เพิ่ม|แก้ไข/ })).toHaveCount(0);
 });
 
@@ -86,7 +87,9 @@ test("users: every problem shows at once, then create, sign in, reset password, 
   await expect(row).toContainText("ปิดบัญชีแล้ว");
   const p4 = await (await page.context().browser()!.newContext()).newPage();
   await loginAs(p4, "t1@myoil.local", "secondpass2");
-  await expect(p4.getByRole("alert").filter({ hasText: "ไม่ถูกต้อง" })).toBeVisible();
+  // design 6.1: with the right password a closed account is told so (a wrong password still gets "ไม่ถูกต้อง")
+  await expect(p4.getByRole("alert").filter({ hasText: "บัญชีนี้ถูกปิดการใช้งาน" })).toBeVisible();
+  await expect(p4).toHaveURL(/\/login/);
 });
 
 test("the admin cannot close their own account or the last admin", async ({ page }) => {
@@ -148,4 +151,24 @@ test("cycles: the next cycle is already listed and its end date can change", asy
   await f.getByRole("button", { name: "บันทึกวันที่" }).click();
   await expect(page.getByRole("status")).toContainText("บันทึกวันที่ของรอบแล้ว");
   await expect(future).toContainText("20/");
+});
+
+test("cycles are cut on a set day of every month: open cycles are laid out again, slips follow their own dates", async ({ page }) => {
+  await login(page, "admin");
+  await page.goto("/settings/cycles");
+  const form = page.getByRole("form", { name: "วันตัดรอบของทุกเดือน" });
+  await expect(form.getByRole("button", { name: "บันทึกวันตัดรอบ" })).toBeDisabled(); // nothing changed yet
+  await form.getByLabel("ตัดรอบทุกวันที่").selectOption({ label: "วันที่ 21" });
+  await expect(page.getByText("รอบหนึ่งคือวันที่ 22 ถึงวันที่ 21 ของเดือนถัดไป")).toBeVisible();
+  await form.getByRole("button", { name: "บันทึกวันตัดรอบ" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "บันทึกวันตัดรอบแล้ว" })).toBeVisible();
+  // every open cycle now ends on a 21st, and the next one starts on the 22nd
+  await expect(page.getByRole("cell", { name: /^21\/\d\d\/\d\d$/ }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: /^22\/\d\d\/\d\d$/ }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: /^(30|31)\/\d\d\/\d\d$/ })).toHaveCount(0);
+
+  // back to the calendar month
+  await form.getByLabel("ตัดรอบทุกวันที่").selectOption({ label: "สิ้นเดือน (เดือนปฏิทิน)" });
+  await form.getByRole("button", { name: "บันทึกวันตัดรอบ" }).click();
+  await expect(page.getByRole("cell", { name: /^01\/\d\d\/\d\d$/ }).first()).toBeVisible();
 });

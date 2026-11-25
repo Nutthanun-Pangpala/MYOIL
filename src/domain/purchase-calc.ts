@@ -10,6 +10,9 @@ export type PurchaseResult =
   | { ok: true; liters: number; price: number; amount: number }
   | { ok: false; error: string; field?: "liters" | "price" | "amount" };
 
+/** how the form names each number, so a message says which box it is about (OBS-27) */
+export const FIELD_NAME = { liters: "ลิตร", price: "ราคาต่อลิตร", amount: "จำนวนเงิน" } as const;
+
 const positive = (n: number | null): n is number => n !== null && Number.isFinite(n) && n > 0;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -21,7 +24,7 @@ export function completePurchase(p: PurchaseNumbers): PurchaseResult {
   if (given.some((v) => v !== null && !positive(v))) return { ok: false, error: "ตัวเลขต้องมากกว่า 0" };
   // what the admin typed must match the bill: refuse a 3rd decimal instead of rounding it away
   for (const [field, v] of [["liters", p.liters], ["price", p.price], ["amount", p.amount]] as const) {
-    if (v !== null && !hasAtMostTwoDecimals(v)) return { ok: false, error: TWO_DECIMALS_MESSAGE, field };
+    if (v !== null && !hasAtMostTwoDecimals(v)) return { ok: false, error: `${FIELD_NAME[field]} ${TWO_DECIMALS_MESSAGE}`, field };
   }
 
   const { liters, price, amount } = p;
@@ -45,7 +48,7 @@ export const ODD_MIN_LITERS = 100;
 export function purchaseOddities(p: { liters: number; price: number; dailyPrice: number | null; capacity: number | null }): string[] {
   const out: string[] = [];
   if (p.dailyPrice !== null && p.dailyPrice > 0 && Math.abs(p.price - p.dailyPrice) / p.dailyPrice > ODD_PRICE_SHARE) {
-    out.push(`ราคา ${p.price.toFixed(2)} บาท/ลิตร ต่างจากราคาประจำวันล่าสุด ${p.dailyPrice.toFixed(2)} บาท เกิน ${ODD_PRICE_SHARE * 100}%`);
+    out.push(`ราคา ${p.price.toFixed(2)} บาท/ลิตร ต่างจากราคาของบิลซื้อก่อนหน้า ${p.dailyPrice.toFixed(2)} บาท เกิน ${ODD_PRICE_SHARE * 100}%`);
   }
   if (p.capacity !== null && p.liters > p.capacity) {
     out.push(`ซื้อ ${p.liters} ลิตร มากกว่าความจุถัง ${p.capacity} ลิตร`);

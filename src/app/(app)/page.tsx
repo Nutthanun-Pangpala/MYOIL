@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { TankPanel } from "@/components/tank-panel";
-import { Card, Pill, linkButton } from "@/components/ui";
+import { Card, Pill, ProjectChip, StateBox, linkButton } from "@/components/ui";
 import { isMonth, monthRange } from "@/domain/iso-date";
-import { thaiLong, thaiMonth } from "@/domain/thai-date";
+import { thaiLong, thaiMonth, thaiRange } from "@/domain/thai-date";
 import { formatBaht, formatLiters } from "@/lib/format";
 import { canWriteFuel } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
@@ -29,9 +29,9 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
     todo.push({
       key: "unsigned",
       tag: <Pill tone="wait">ใบจ่าย</Pill>,
-      text: `รอเซ็นรับ ${v.unsigned.slips} ใบ รวม ${formatLiters(v.unsigned.liters)} ลิตร (ยังไม่นับในใบแจ้งค่าใช้จ่ายจนกว่าจะเซ็น)`,
+      text: `ยังไม่เซ็นรับ ${v.unsigned.slips} ใบ รวม ${formatLiters(v.unsigned.liters)} ลิตร ยังไม่นับเข้าใบแจ้งค่าใช้จ่ายจนกว่าจะเซ็น`,
       href: "/issues?signed=no",
-      link: "ดูใบที่รอเซ็นรับ",
+      link: "ดูใบที่ยังไม่เซ็นรับ",
     });
   if (v.negative)
     todo.push({
@@ -40,6 +40,14 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
       text: `ติดลบ ${v.negative.days} วัน ตั้งแต่ ${thaiLong(v.negative.first)} (เหลือ ${formatLiters(v.negative.closing)} ลิตร) ตรวจว่าคีย์ซื้อน้ำมันเข้าครบหรือยัง แล้วค่อยตรวจใบจ่ายของวันนั้น`,
       href: `/ledger?month=${v.negative.first.slice(0, 7)}`,
       link: "เปิดสมุดคงเหลือ",
+    });
+  if (v.closeDue)
+    todo.push({
+      key: "close",
+      tag: <Pill tone="wait">ปิดรอบ</Pill>,
+      text: `รอบ ${v.closeDue.label} ยังไม่ปิด${v.closeDue.unsigned > 0 ? ` และมีใบยังไม่เซ็นรับ ${v.closeDue.unsigned} ใบ` : ""}`,
+      href: `/invoices?cycle=${v.closeDue.cycleId}`,
+      link: "ไปที่ใบแจ้งค่าใช้จ่าย",
     });
 
   const stat = (title: string, value: string, unit: string, sub: string, href: string) => (
@@ -80,7 +88,7 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
               <li key={t.key} className="flex flex-wrap items-center gap-x-3.5 gap-y-2 border-t border-line py-3">
                 {t.tag}
                 <span className="min-w-0 flex-[1_1_320px]">{t.text}</span>
-                <Link href={t.href} className={linkButton("secondary")}>
+                <Link href={t.href} className="whitespace-nowrap text-earth underline hover:text-ink">
                   {t.link}
                 </Link>
               </li>
@@ -91,8 +99,10 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
 
       <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
         <div className="flex flex-col gap-0.5">
-          <h2 className="font-display text-2xl font-semibold leading-snug">สรุปเดือน {label}</h2>
-          <span className="text-muted">{isCurrent ? "ตัวเลขด้านล่างนับถึงวันนี้" : "ทั้งเดือน"}</span>
+          <h2 className="font-display text-2xl font-semibold leading-[1.35]">สรุปเดือน {label}</h2>
+          <span className="text-muted">
+            {thaiRange(monthRange(month).start, monthRange(month).end)} {isCurrent ? "ตัวเลขด้านล่างนับถึงวันนี้" : "ทั้งเดือน"}
+          </span>
         </div>
         <CycleSelect month={month} months={v.months} />
       </div>
@@ -100,16 +110,37 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
       <div className="flex flex-wrap gap-4">
         {stat("จ่ายออก", formatLiters(v.breakdown.liters), "ลิตร", `${v.breakdown.rows.length} โครงการที่มีการเติม`, `/monthly?month=${month}`)}
         {stat("มูลค่าน้ำมันที่จ่ายออก", formatBaht(v.breakdown.amount), "บาท", `${v.price === null ? "ยังไม่มีราคาน้ำมัน" : `ราคาวันนี้ ${formatBaht(v.price)} บาท/ลิตร`}${v.breakdown.unsignedAmount > 0 ? ` · ในนี้ยังไม่เซ็นรับ ${formatBaht(v.breakdown.unsignedAmount)} บาท` : ""}`, "/invoices")}
-        {stat("ใบจ่าย", String(v.breakdown.slips), "ใบ", `วันนี้ ${v.todaySlips} ใบ`, `/issues?from=${monthRange(month).start}&to=${monthRange(month).end}`)}
+        {stat("ใบจ่าย", String(v.breakdown.slips), "ใบ", `วันนี้ ${v.todaySlips} ใบ`, `/issues?from=${v.range.start}&to=${v.range.end}`)}
       </div>
 
-      <Card>
-        <h2 className="font-display text-xl font-medium leading-snug">แยกโครงการ เรียงจากที่ใช้มากที่สุด</h2>
+      <Card className="flex flex-col gap-3 p-6">
+        <h2 className="font-display text-xl font-medium leading-[1.4]">แยกโครงการ เรียงจากที่ใช้มากที่สุด</h2>
         {v.breakdown.rows.length === 0 ? (
-          <p className="py-8 text-center text-muted">ยังไม่มีการจ่ายน้ำมันในเดือนนี้</p>
+          writer && v.months.length <= 1 ? (
+            // design "ยังไม่มีข้อมูล": the overview before anything was ever keyed
+            <StateBox title="เริ่มใช้ MYOIL ครั้งแรก">
+              <ol className="flex list-decimal flex-col gap-1 pl-5">
+                <li>
+                  <Link href="/purchases?new=purchase" className="text-earth underline hover:text-ink">
+                    บันทึกน้ำมันซื้อเข้า
+                  </Link>{" "}
+                  เพื่อให้มีราคาและยอดในรถ
+                </li>
+                <li>
+                  <Link href="/issues/new" className="text-earth underline hover:text-ink">
+                    บันทึกใบจ่ายใบแรก
+                  </Link>
+                </li>
+              </ol>
+            </StateBox>
+          ) : (
+            <StateBox title="ยังไม่มีการจ่ายน้ำมันในเดือนนี้" actions={writer && <Link href="/issues/new" className={linkButton("primary")}>บันทึกใบจ่าย</Link>}>
+              เลือกเดือนอื่นด้านบน หรือบันทึกใบจ่ายของเดือนนี้
+            </StateBox>
+          )
         ) : (
           <>
-          <div className="mt-3 hidden overflow-x-auto md:block">
+          <div className="hidden overflow-x-auto md:block">
             <table className="t">
               <thead>
                 <tr>
@@ -127,7 +158,7 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
                 {v.breakdown.rows.map((r) => (
                   <tr key={r.key}>
                     <td>
-                      <span className="inline-block whitespace-nowrap rounded-lg bg-idle-soft px-2.5 py-0.5 font-display text-sm font-medium text-earth">{r.label}</span>
+                      <ProjectChip code={r.label} />
                     </td>
                     <td className="n">{r.slips}</td>
                     <td className="n font-semibold">{formatLiters(r.liters)}</td>
@@ -168,12 +199,12 @@ export default async function Home({ searchParams }: { searchParams: SP }) {
             </table>
           </div>
           {/* phone / narrow window: one row per project instead of a table that scrolls sideways */}
-          <ul className="mt-3 divide-y divide-line md:hidden">
+          <ul className="divide-y divide-line md:hidden">
             {v.breakdown.rows.map((r) => (
               <li key={r.key}>
                 <Link href={`/monthly?month=${month}&project=${r.key}`} className="block py-3 text-ink no-underline">
                   <div className="flex items-center justify-between gap-3">
-                    <span className="inline-block whitespace-nowrap rounded-lg bg-idle-soft px-2.5 py-0.5 font-display text-sm font-medium text-earth">{r.label}</span>
+                    <ProjectChip code={r.label} />
                     <span className="font-semibold tabular-nums">{formatBaht(r.amount)} บาท</span>
                   </div>
                   <div aria-hidden className="mt-2 h-2 rounded-[4px] bg-page">

@@ -24,7 +24,8 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "desktop", use: { ...devices["Desktop Chrome"] } }],
+  // Chrome's fake camera, allowed without a prompt: the driver screens photograph the meter with the in-app camera
+  projects: [{ name: "desktop", use: { ...devices["Desktop Chrome"], permissions: ["camera"], launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } } }],
   webServer: {
     command: `npx next dev -p ${PORT}`,
     url: `http://localhost:${PORT}/api/health`,

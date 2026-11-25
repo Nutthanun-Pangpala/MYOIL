@@ -40,17 +40,12 @@ test("a bill photo can be attached and opened", async ({ page }) => {
   expect(res.headers()["content-type"]).toContain("image/jpeg");
 });
 
-test("a price entered later reprices an open slip that was waiting", async ({ page }) => {
+test("a purchase bill recorded later prices an open slip that was waiting", async ({ page }) => {
   await login(page, "store");
   await keyIssue(page, { book: "9", doc: "1", date: "2026-02-01", machine: "L-A", liters: "10" });
   await expect(page.getByText("รอราคา").first()).toBeVisible();
-  await page.goto("/purchases?month=2026-02");
-  await page.getByRole("link", { name: "ตั้งราคาของวันที่ไม่มีการซื้อ" }).click();
-  const form = page.getByRole("form", { name: "ตั้งราคาประจำวัน" });
-  await form.getByLabel("วันที่").fill("2026-02-01");
-  await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
-  await form.getByRole("button", { name: "บันทึก", exact: true }).click();
-  await expect(page.getByRole("row").filter({ hasText: "ตั้งเอง วันนั้นไม่มีการซื้อ" })).toContainText("40.00"); // saved
+  await recordPurchase(page, { date: "2026-02-01", liters: "1000", price: "40" });
+  await expect(page.getByRole("row").filter({ hasText: "รวม 1 ครั้ง" })).toContainText("40,000.00"); // saved
   await page.goto("/issues");
   await expect(page.getByRole("row").filter({ hasText: "L-A" })).toContainText("400.00");
 });

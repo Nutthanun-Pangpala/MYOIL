@@ -31,6 +31,13 @@ const SHAPES: Record<string, ReactNode> = {
       <path d="M5 17a3 3 0 0 1 3-3h11" />
     </>
   ),
+  "phone-check": (
+    <>
+      <rect x="6" y="2.5" width="12" height="19" rx="2.5" />
+      <path d="M9.5 12l2 2 3.5-4" />
+    </>
+  ),
+  bars: <path d="M4 20V10M10 20V4M16 20v-7M21 20H3" />,
   route: (
     <>
       <circle cx="6" cy="18" r="2.5" />

@@ -23,7 +23,9 @@
     "test:e2e:purchases": "playwright test e2e/purchases.spec.ts e2e/leftovers.spec.ts",
     "test:e2e:reports": "playwright test e2e/ledger.spec.ts e2e/monthly.spec.ts e2e/overview.spec.ts",
     "test:e2e:auth": "playwright test e2e/auth.spec.ts",
+    "test:e2e:driver": "playwright test e2e/driver.spec.ts e2e/driver-fill.spec.ts",
     "test:e2e:ba": "playwright test e2e/ba-rulings.spec.ts",
+    "test:e2e:stage2": "playwright test e2e/bookcare-api.spec.ts e2e/mobile-review.spec.ts e2e/routes.spec.ts e2e/security-headers.spec.ts",
     "e2e:install": "playwright install chromium"
   },
   "dependencies": {

@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
-import { Button, Card } from "@/components/ui";
+import { Button, Card, CardTitle, linkButton } from "@/components/ui";
 import { shrinkImage } from "@/lib/image-shrink";
 import { attachSignedPhotoAction, removeSignedPhotoAction } from "../actions";
 
@@ -57,23 +57,19 @@ export function SignedPhotoCard({
 
   return (
     <Card className="flex flex-col gap-3 p-5">
-      <h2 className="font-display text-lg text-earth">รูปใบเซ็น</h2>
+      <CardTitle>รูปแนบ</CardTitle>
       {photoAt ? (
-        <a href={src} target="_blank" rel="noreferrer" className="block w-fit" aria-label="เปิดรูปใบเซ็นเต็มจอ">
+        <a href={src} target="_blank" rel="noreferrer" className="block" aria-label="เปิดรูปใบเซ็นเต็มจอ" title="กดเพื่อขยาย">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={src} alt="รูปใบจ่ายที่เซ็นแล้ว" className="max-h-80 max-w-full rounded-control border border-line object-contain" />
+          <img src={src} alt="รูปใบจ่ายที่เซ็นแล้ว" className="max-h-80 w-full rounded-control border border-line bg-page object-contain" />
         </a>
       ) : (
-        <p className="text-[14px] text-muted">ยังไม่มีรูปใบเซ็น</p>
+        <p className="flex h-[140px] items-center justify-center rounded-control border border-line bg-page px-4 text-center text-sm text-muted">ยังไม่มีรูปใบเซ็น</p>
       )}
       {canEdit && !lock && (
         <div className="flex flex-wrap items-center gap-3">
           <input ref={fileRef} id="signed-photo" type="file" accept="image/*" className="sr-only" onChange={(e) => onPick(e.target.files?.[0])} />
-          <label
-            htmlFor="signed-photo"
-            aria-disabled={busy}
-            className="inline-flex h-11 cursor-pointer items-center justify-center rounded-control bg-safety px-4 font-display text-[15px] text-ink aria-disabled:opacity-50"
-          >
+          <label htmlFor="signed-photo" aria-disabled={busy} className={`${linkButton("secondary")} cursor-pointer aria-disabled:opacity-50`}>
             {photoAt ? "เปลี่ยนรูปใบเซ็น" : "แนบรูปใบเซ็น"}
           </label>
           {photoAt && !confirming && (
@@ -94,7 +90,7 @@ export function SignedPhotoCard({
           )}
         </div>
       )}
-      {canEdit && lock && <p className="text-[14px] text-muted">{lock}</p>}
+      {canEdit && lock && <p className="text-sm text-muted">{lock}</p>}
       {busy && <p className="text-[14px] text-muted">กำลังบันทึกรูป…</p>}
       {msg && (
         <p role="alert" className="text-[14px] text-repair">
@@ -102,7 +98,7 @@ export function SignedPhotoCard({
         </p>
       )}
       {ok && (
-        <p role="status" className="rounded-control bg-working-soft px-3 py-2 text-[14px] text-working">
+        <p role="status" className="rounded-control bg-working-soft px-3 py-2 text-sm text-working-ink">
           {ok}
         </p>
       )}

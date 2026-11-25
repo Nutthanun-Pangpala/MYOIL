@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calendarMonthCycle, nextCycleAfter, overlaps } from "./cycle";
+import { calendarMonthCycle, cycleContaining, cycleRanges, isCutDay, nextCycleAfter, overlaps } from "./cycle";
 
 describe("calendarMonthCycle", () => {
   it("covers the whole month", () => {
@@ -16,6 +16,36 @@ describe("nextCycleAfter", () => {
   it("starts the day after and runs to that month's end", () => {
     expect(nextCycleAfter("2026-11-30")).toEqual({ start: "2026-12-01", end: "2026-12-31" });
     expect(nextCycleAfter("2026-12-31")).toEqual({ start: "2027-01-01", end: "2027-01-31" });
+  });
+});
+
+describe("a cut day: the cycle is cut on the 21st of every month", () => {
+  it("a date up to the 21st belongs to the cycle ending that 21st, later dates to the next one", () => {
+    expect(cycleContaining("2026-11-05", 21)).toEqual({ start: "2026-10-22", end: "2026-11-21" });
+    expect(cycleContaining("2026-11-21", 21)).toEqual({ start: "2026-10-22", end: "2026-11-21" });
+    expect(cycleContaining("2026-11-22", 21)).toEqual({ start: "2026-11-22", end: "2026-12-21" });
+  });
+  it("rolls over the year both ways", () => {
+    expect(cycleContaining("2026-12-25", 21)).toEqual({ start: "2026-12-22", end: "2027-01-21" });
+    expect(cycleContaining("2027-01-10", 21)).toEqual({ start: "2026-12-22", end: "2027-01-21" });
+  });
+  it("no cut day = the calendar month", () => {
+    expect(cycleContaining("2026-11-22", null)).toEqual({ start: "2026-11-01", end: "2026-11-30" });
+  });
+  it("the next cycle starts the day after, whatever the last end was, and runs to the next cut", () => {
+    expect(nextCycleAfter("2026-11-21", 21)).toEqual({ start: "2026-11-22", end: "2026-12-21" });
+    expect(nextCycleAfter("2026-11-30", 21)).toEqual({ start: "2026-12-01", end: "2026-12-21" });
+  });
+  it("lays cycles in a row from an anchor until a day is covered", () => {
+    expect(cycleRanges("2026-11-01", 21, 2, "2026-11-25")).toEqual([
+      { start: "2026-11-01", end: "2026-11-21" },
+      { start: "2026-11-22", end: "2026-12-21" },
+    ]);
+    expect(cycleRanges("2026-11-01", null, 1, "2026-11-25")).toEqual([{ start: "2026-11-01", end: "2026-11-30" }]);
+  });
+  it("accepts 1–28 only", () => {
+    expect([1, 21, 28].every(isCutDay)).toBe(true);
+    expect([0, 29, 31, 2.5, "21", null].some(isCutDay)).toBe(false);
   });
 });
 

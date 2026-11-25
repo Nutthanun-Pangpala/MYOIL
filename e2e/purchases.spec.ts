@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { login, recordPurchase, resetData } from "./helpers";
+import { keyIssue, login, recordPurchase, resetData } from "./helpers";
 
 // fixed past month: the tests do not depend on today's date
 const DAY = "2026-01-15";
@@ -29,7 +29,7 @@ test("three numbers that disagree are refused", async ({ page }) => {
   await expect(form.getByRole("alert")).toContainText("จำนวนเงินไม่ตรง");
 });
 
-test("a purchase appears in the list and sets that day's price", async ({ page }) => {
+test("a purchase appears in the list with its totals", async ({ page }) => {
   await login(page, "store");
   await recordPurchase(page, { date: DAY, liters: "1000", price: "40", billNo: "B-001" });
 
@@ -39,44 +39,28 @@ test("a purchase appears in the list and sets that day's price", async ({ page }
   await expect(row).toContainText("40,000.00");
   await expect(page.getByRole("row").filter({ hasText: "รวม 1 ครั้ง" })).toContainText("40,000.00");
 
-  const price = page.getByRole("row").filter({ hasText: "จากการซื้อวันนั้น" });
-  // runs until the day before the next price (the seeded price of today), so it is not "ยังใช้อยู่"
-  await expect(price).toContainText("15/01/69");
-  await expect(price).toContainText("40.00");
+  // no daily price list any more (owner, 25 Nov 2026): the page says how slips are priced instead
+  await expect(page.getByText("ไม่มีตารางราคาประจำวันแล้ว")).toBeVisible();
+  await expect(page.getByRole("link", { name: "ตั้งราคาของวันที่ไม่มีการซื้อ" })).toHaveCount(0);
 });
 
-test("a second purchase at another price keeps the day's price and says so", async ({ page }) => {
+test("two bills on one day: slips use the bill recorded last; cancelling it falls back to the first", async ({ page }) => {
   await login(page, "store");
-  await page.goto(`/purchases?month=${MONTH}&new=purchase`);
-  const form = page.getByRole("form", { name: "บันทึกการซื้อ" });
-  await form.getByLabel("วันที่").fill(DAY);
-  await form.getByLabel("เติมเข้า (ลิตร)").fill("500");
-  await form.getByLabel("ราคาต่อลิตร (บาท)").fill("41");
-  await form.getByRole("button", { name: "บันทึก", exact: true }).click();
-  await expect(form.getByRole("status")).toContainText("ไม่ตรงกับราคาที่ซื้อ");
-  await form.getByRole("button", { name: "รับทราบ" }).click();
+  await keyIssue(page, { book: "3", doc: "1", date: "2026-01-20", machine: "BILL-A", liters: "10" });
+  await expect(page.getByText("ตามบิลซื้อวันที่ 15/01/69 เลขที่ B-001")).toBeVisible(); // 40.00 from the first bill
+
+  await recordPurchase(page, { date: DAY, liters: "500", price: "41", billNo: "B-002" }); // reprices the open slip, says so, "รับทราบ"
   await expect(page.getByRole("row").filter({ hasText: "รวม 2 ครั้ง" })).toBeVisible();
-});
+  await page.goto("/issues");
+  await expect(page.getByRole("row").filter({ hasText: "BILL-A" })).toContainText("410.00");
 
-test("a price for a day with no purchase can be set, then corrected", async ({ page }) => {
-  await login(page, "store");
   await page.goto(`/purchases?month=${MONTH}`);
-  await page.getByRole("link", { name: "ตั้งราคาของวันที่ไม่มีการซื้อ" }).click();
-  const form = page.getByRole("form", { name: "ตั้งราคาประจำวัน" });
-  await form.getByLabel("วันที่").fill("2026-01-20");
-  await form.getByLabel("ราคาต่อลิตร (บาท)").fill("41.5");
-  await form.getByRole("button", { name: "บันทึก", exact: true }).click();
-
-  const row = page.getByRole("row").filter({ hasText: "ตั้งเอง วันนั้นไม่มีการซื้อ" });
-  await expect(row).toContainText("41.50");
-  await expect(row).toContainText("20/01/69");
-
-  await row.getByRole("link", { name: "แก้ราคา" }).click();
-  const edit = page.getByRole("form", { name: "ตั้งราคาประจำวัน" });
-  await expect(edit.getByLabel("ราคาต่อลิตร (บาท)")).toHaveValue("41.5");
-  await edit.getByLabel("ราคาต่อลิตร (บาท)").fill("42");
-  await edit.getByRole("button", { name: "บันทึก", exact: true }).click();
-  await expect(page.getByRole("row").filter({ hasText: "ตั้งเอง วันนั้นไม่มีการซื้อ" })).toContainText("42.00");
+  await page.getByRole("row").filter({ hasText: "B-002" }).getByRole("button", { name: "ยกเลิก", exact: true }).click();
+  await page.getByLabel("เหตุผลที่ยกเลิกรายการซื้อ").fill("e2e ยกเลิกบิลที่สอง");
+  await page.getByRole("button", { name: "ยืนยันยกเลิก" }).click();
+  await expect(page.getByText("ยกเลิกแล้ว: e2e ยกเลิกบิลที่สอง")).toBeVisible();
+  await page.goto("/issues");
+  await expect(page.getByRole("row").filter({ hasText: "BILL-A" })).toContainText("400.00");
 });
 
 test("the month dropdown opens another month", async ({ page }) => {

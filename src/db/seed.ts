@@ -3,9 +3,10 @@
  * it WIPES every fuel record (issues, purchases, prices, cycles, invoices…) and the demo accounts first.
  * The e2e tests rely on this to start from the same state each time.
  */
-import { inArray, like, or, sql } from "drizzle-orm";
+import { eq, inArray, like, or, sql } from "drizzle-orm";
 import { db, schema, client } from "./index";
 import { hashSecret } from "../lib/password";
+import { driverEmail } from "../domain/driver-login";
 import { StaticProjectSource } from "../server/projects/project-source";
 import { syncProjects } from "../server/projects/sync-projects";
 
@@ -16,6 +17,13 @@ const DEMO_USERS = [
   { name: "ผู้ดูโครงการ (demo)", email: "viewer@myoil.local", role: "project_viewer" },
   { name: "ผู้บริหาร (demo)", email: "exec@myoil.local", role: "executive" },
   { name: "ผู้ดูแลระบบ (demo)", email: "admin@myoil.local", role: "system_admin" },
+] as const;
+
+// trial drivers (owner, 25 Nov 2026): phone + PIN at /login/driver. Local demo only.
+const DEMO_PIN = "246810";
+const DEMO_DRIVERS = [
+  { name: "สุชาติ แก้วใส (demo)", phone: "0810000001" },
+  { name: "วิชัย มั่นคง (demo)", phone: "0810000002" },
 ] as const;
 
 async function main() {
@@ -35,8 +43,11 @@ async function main() {
         DEMO_USERS.map((u) => u.email),
       ),
       like(schema.users.email, "%@myoil.local"),
+      // every driver account: the e2e specs add drivers with other phones ("เพิ่มคนขับ"), and one left behind makes the next run's phone "already used"
+      eq(schema.users.role, "driver"),
     ),
   );
+  await db.insert(schema.users).values(DEMO_DRIVERS.map((d) => ({ name: d.name, phone: d.phone, email: driverEmail(d.phone), role: "driver" as const, passwordHash: hashSecret(DEMO_PIN) })));
   await db.insert(schema.users).values(DEMO_USERS.map((u) => ({ ...u, passwordHash: hashSecret(DEMO_PASSWORD) })));
 
   // placeholder projects until the BookCare link is decided; the yard counts as a project (BA proposal)
@@ -48,12 +59,10 @@ async function main() {
     ]),
   );
 
-  // today's price (Bangkok), so a slip keyed today shows an amount; key a slip for another date to see "รอราคา"
+  // one purchase bill today (Bangkok): 5,000 liters at 32.50, so the truck has fuel and a slip keyed today shows an amount
+  // (a slip takes its price from the latest bill on or before its date; key one for an earlier date to see "รอราคา")
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
-  await db
-    .insert(schema.fuelPrices)
-    .values({ priceDate: today, pricePerLiter: 32.5 })
-    .onConflictDoNothing({ target: schema.fuelPrices.priceDate });
+  await db.insert(schema.fuelPurchases).values({ purchaseDate: today, liters: 5000, pricePerLiter: 32.5, amount: 162500, billNo: "DEMO-0001", note: "ข้อมูลตัวอย่าง" });
 
   await db
     .insert(schema.appSettings)
@@ -62,6 +71,8 @@ async function main() {
 
   console.log("seeded. demo logins (password for all: %s):", DEMO_PASSWORD);
   for (const u of DEMO_USERS) console.log(`  ${u.role.padEnd(15)} ${u.email}`);
+  console.log("demo drivers at /login/driver (PIN for all: %s):", DEMO_PIN);
+  for (const d of DEMO_DRIVERS) console.log(`  ${d.phone}  ${d.name}`);
 }
 
 main()

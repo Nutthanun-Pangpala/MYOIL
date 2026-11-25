@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { Button, Card, linkButton } from "@/components/ui";
+import { Toast } from "@/components/toast";
+import { Button, Card, Kbd, Pill, linkButton } from "@/components/ui";
 import { checkIssue, nextDocNo, type IssueCheck, type IssueInput } from "@/domain/issue-check";
 import { hasAtMostTwoDecimals, lineAmount, sumAmounts, sumLiters } from "@/domain/money";
 import { thaiShort } from "@/domain/thai-date";
@@ -23,19 +24,24 @@ const toNum = (s: string): number | null => {
 };
 const projectLabel = (p: Project) => `${p.refCode} — ${p.name}`;
 
+/** design 6.4: the paper slip's fields top to bottom on the left; what it adds up to and the save buttons on the right */
 export function IssueForm({
   projects,
   machines,
   initial,
-  justSaved,
+  saved,
+  keyedToday,
   edit,
 }: {
   projects: Project[];
   machines: string[];
   initial: { issueDate: string; bookNo: string; docNo: string };
-  justSaved: boolean;
-  /** editing a saved slip: its id, the values it holds now, and the project as the box shows it */
-  edit?: { id: string; input: IssueInput; projectText: string };
+  /** the slip saved just before ("บันทึกและคีย์ใบถัดไป"): a short message with a link to it */
+  saved: { id: string | null; label: string } | null;
+  /** "วันนี้คีย์แล้ว n ใบ" */
+  keyedToday?: number;
+  /** editing a saved slip: its id, the values it holds now, the project as the box shows it, when it was keyed */
+  edit?: { id: string; input: IssueInput; projectText: string; savedAt: string | null };
 }) {
   const router = useRouter();
   const [saving, startSaving] = useTransition();
@@ -134,6 +140,7 @@ export function IssueForm({
   // ── save ──
   const [saveError, setSaveError] = useState<string | null>(null);
   function save(mode: "done" | "next") {
+    if (saving) return; // Ctrl+Enter while the first save is still on its way must not send the slip twice (OBS-34)
     setAttempted(true);
     setSaveError(null);
     // the instant rules decide whether to send; the server re-checks everything and answers with its own errors
@@ -153,7 +160,7 @@ export function IssueForm({
             // the slip is saved; only the picture failed → say so on the slip's page, where it can be attached again
             router.push(`/issues/${res.id}?saved=1&photo=failed`);
           } else if (mode === "next") {
-            const q = new URLSearchParams({ saved: "1", date: issueDate, book: bookNo.trim(), doc: nextDocNo(docNo) });
+            const q = new URLSearchParams({ saved: "1", last: res.id, lastNo: `${bookNo.trim()}/${docNo.trim()}`, date: issueDate, book: bookNo.trim(), doc: nextDocNo(docNo) });
             // full reload of the page state: an empty form, same date, next number
             window.location.assign(`/issues/new?${q}`);
           } else {
@@ -168,18 +175,37 @@ export function IssueForm({
     });
   }
 
-  const field = "h-11 w-full rounded-control border border-line bg-card px-3 text-[15px]";
-  const bad = "border-repair";
+  const field = "h-11 w-full min-w-0 rounded-control border border-idle bg-card px-3 text-ink";
+  const bad = "border-2 border-repair";
   const Err = ({ msg }: { msg?: string }) =>
     msg ? (
-      <p role="alert" className="mt-1 text-[13px] text-repair">
+      <p role="alert" className="mt-0.5 text-[13px] leading-normal text-repair">
         บันทึกไม่ได้: {msg}
       </p>
     ) : null;
+  const Warn = ({ children }: { children: React.ReactNode }) => <p className="mt-0.5 text-[13px] leading-normal text-warn-ink">คำเตือน: {children}</p>;
+  const Lbl = ({ htmlFor, children, optional }: { htmlFor: string; children: React.ReactNode; optional?: boolean }) => (
+    <label htmlFor={htmlFor} className="text-sm">
+      {children}
+      {optional && <span className="text-muted"> (ไม่บังคับ)</span>}
+    </label>
+  );
+  const sub = "font-display text-base font-medium leading-[1.4] text-muted";
+  const unsignedWarn = check.warnings.find((w) => w.kind === "unsigned");
+  const nextNo = bookNo.trim() && docNo.trim() ? `ใส่เล่มที่ ${bookNo.trim()} เลขที่ ${nextDocNo(docNo)} ให้` : "ใส่เลขที่ถัดไปให้";
+
+  async function takePhoto(f: File | undefined) {
+    setSlipPhotoError(null);
+    if (!f) return (setSlipPhoto(null), setSlipPhotoName(""));
+    const small = await shrinkImage(f);
+    if (!small) return (setSlipPhoto(null), setSlipPhotoName(""), setSlipPhotoError("เปิดรูปนี้ไม่ได้ เลือกไฟล์ JPG หรือ PNG"));
+    setSlipPhoto(small);
+    setSlipPhotoName(f.name);
+  }
 
   return (
     <form
-      className="flex max-w-5xl flex-col gap-5"
+      className="flex flex-col gap-6"
       onSubmit={(e) => e.preventDefault()}
       onKeyDown={(e) => {
         const el = e.target as HTMLElement;
@@ -192,296 +218,381 @@ export function IssueForm({
         }
       }}
     >
-      <Link href="/issues" className="text-[14px] text-earth underline">
-        กลับไปรายการใบจ่าย
-      </Link>
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="font-display text-2xl text-earth">{edit ? "แก้ไขใบจ่าย" : "บันทึกใบจ่าย"}</h1>
-        <p className="text-[13px] text-muted">ใบเบิกน้ำมันเชื้อเพลิง · ช่องเรียงตามใบกระดาษจากบนลงล่าง</p>
-      </div>
-      {justSaved && (
-        <p role="status" className="rounded-control bg-working-soft px-3 py-2 text-[14px] text-working">
-          บันทึกแล้ว — เปิดฟอร์มเปล่าให้คีย์ใบถัดไป
-        </p>
-      )}
+      <header className="flex flex-col gap-1">
+        <Link href={edit ? `/issues/${edit.id}` : "/issues"} className="self-start text-sm text-earth underline hover:text-ink">
+          {edit ? "กลับไปดูใบจ่ายนี้" : "กลับไปรายการใบจ่าย"}
+        </Link>
+        <h1 className="font-display text-[34px] font-semibold leading-[1.3]">{edit ? `แก้ไขใบจ่าย เล่มที่ ${edit.input.bookNo} เลขที่ ${edit.input.docNo}` : "บันทึกใบจ่าย"}</h1>
+      </header>
+      {saved && <Toast link={saved.id ? { href: `/issues/${saved.id}`, label: "ดูใบ" } : undefined}>{saved.label}</Toast>}
 
-      <Card className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
-        <label className="text-[14px]">
-          เล่มที่
-          <input
-            className={`${field} ${showErr("book", check.errors.book) ? bad : ""}`}
-            value={bookNo}
-            onChange={(e) => setBookNo(e.target.value)}
-            onBlur={() => touch("book")}
-            onFocus={(e) => e.target.select()}
-            inputMode="numeric"
-            autoFocus={!edit && !initial.bookNo}
-          />
-          <Err msg={showErr("book", check.errors.book)} />
-        </label>
-        <label className="text-[14px]">
-          เลขที่
-          <input
-            className={`${field} ${showErr("doc", check.errors.doc) ? bad : ""}`}
-            value={docNo}
-            onChange={(e) => setDocNo(e.target.value)}
-            onBlur={() => touch("doc")}
-            onFocus={(e) => e.target.select()}
-            inputMode="numeric"
-            autoFocus={!edit && !!initial.bookNo}
-          />
-          <Err msg={showErr("doc", check.errors.doc)} />
-          {server?.duplicateIssueId && (
-            <Link href={`/issues/${server.duplicateIssueId}`} className="text-[13px] text-earth underline" target="_blank">
-              เปิดดูใบเดิม
-            </Link>
-          )}
-        </label>
-        <label className="text-[14px]">
-          วันที่ {issueDate && <span className="text-muted">({thaiShort(issueDate)})</span>}
-          <input
-            type="date"
-            className={`${field} ${showErr("date", check.errors.date) ? bad : ""}`}
-            value={issueDate}
-            onChange={(e) => setIssueDate(e.target.value)}
-            onBlur={() => touch("date")}
-          />
-          <Err msg={showErr("date", check.errors.date)} />
-        </label>
-        <label className="text-[14px]">
-          โครงการ
-          <input
-            className={`${field} ${showErr("project", check.errors.project) ? bad : ""}`}
-            list="project-list"
-            value={projectText}
-            onChange={(e) => setProjectText(e.target.value)}
-            onBlur={() => touch("project")}
-            placeholder="พิมพ์รหัสหรือชื่อ"
-          />
-          <datalist id="project-list">
-            {projects.map((p) => (
-              <option key={p.id} value={projectLabel(p)} />
-            ))}
-          </datalist>
-          <Err msg={showErr("project", check.errors.project)} />
-        </label>
-        <label className="text-[14px]">
-          เวลาเข้า <span className="text-muted">(ไม่บังคับ)</span>
-          <input type="time" className={field} value={timeIn} onChange={(e) => setTimeIn(e.target.value)} />
-        </label>
-        <label className="text-[14px]">
-          เวลาออก <span className="text-muted">(ไม่บังคับ)</span>
-          <input type="time" className={field} value={timeOut} onChange={(e) => setTimeOut(e.target.value)} />
-        </label>
-        <label className="text-[14px]">
-          พขร.เติมน้ำมัน <span className="text-muted">(ไม่บังคับ)</span>
-          <input className={field} value={fuelDriver} onChange={(e) => setFuelDriver(e.target.value)} />
-        </label>
-        <label className="text-[14px]">
-          พขร.ดูแลเครื่องจักร <span className="text-muted">(ไม่บังคับ)</span>
-          <input className={field} value={machineDriver} onChange={(e) => setMachineDriver(e.target.value)} />
-        </label>
-      </Card>
-
-      <Card className="p-5">
-        <h2 className="mb-3 font-display text-lg text-earth">รายการเครื่องจักร</h2>
-        <datalist id="machine-list">
-          {machines.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-        <div className="flex flex-col gap-4">
-          {lines.map((l, i) => {
-            const le = check.errors.lines[i];
-            const warns = check.warnings.filter((w) => w.line === i);
-            return (
-              <div key={i} className="flex flex-col gap-2">
-                <div className="grid grid-cols-[2rem_1fr_auto] items-start gap-3 sm:grid-cols-[2rem_2fr_1fr_1fr_auto]">
-                  <span className="pt-3 text-[14px] text-muted">{i + 1}</span>
-                  <label className="col-span-2 text-[13px] text-muted sm:col-span-1">
-                    รายการหรือรหัสเครื่องจักร
-                    <input
-                      data-line={i}
-                      data-f="machine"
-                      list="machine-list"
-                      className={`${field} text-ink ${showErr(`m${i}`, le?.machine) ? bad : ""}`}
-                      value={l.machine}
-                      onChange={(e) => setLine(i, { machine: e.target.value })}
-                      onBlur={() => touch(`m${i}`)}
-                      placeholder="เช่น PC210, รถหกล้อ 50-9653"
-                    />
-                    <Err msg={showErr(`m${i}`, le?.machine)} />
-                  </label>
-                  <label className="text-[13px] text-muted">
-                    ชั่วโมงการทำงาน (ไม่บังคับ)
-                    <input
-                      data-line={i}
-                      data-f="hours"
-                      inputMode="decimal"
-                      className={`${field} num text-ink`}
-                      value={l.hourMeter}
-                      onChange={(e) => setLine(i, { hourMeter: e.target.value })}
-                    />
-                  </label>
-                  <label className="text-[13px] text-muted">
-                    จำนวนน้ำมัน (ลิตร)
-                    <input
-                      data-line={i}
-                      data-f="liters"
-                      inputMode="decimal"
-                      className={`${field} num text-ink ${showErr(`l${i}`, le?.liters) ? bad : ""}`}
-                      value={l.liters}
-                      onChange={(e) => setLine(i, { liters: e.target.value })}
-                      onBlur={() => touch(`l${i}`)}
-                    />
-                    <Err msg={showErr(`l${i}`, le?.liters)} />
-                  </label>
-                  <button type="button" onClick={() => removeLine(i)} className="h-11 self-end text-[14px] text-earth underline">
-                    ลบบรรทัด
-                  </button>
-                </div>
-                {warns.map((w, k) => (
-                  <p key={k} className="ml-11 rounded-control bg-safety-soft px-3 py-2 text-[13px] text-ink">
-                    คำเตือน: {w.message} ตรวจกับใบอีกครั้ง ยังบันทึกได้
-                  </p>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <Button type="button" onClick={addLine}>
-            เพิ่มบรรทัด
-          </Button>
-          <span className="text-[13px] text-muted">หรือกด Enter ที่ช่องลิตรของบรรทัดสุดท้าย</span>
-        </div>
-      </Card>
-
-      <Card className="grid gap-4 p-5 sm:grid-cols-2">
-        <h2 className="font-display text-lg text-earth sm:col-span-2">เซ็นรับและรูปแนบ</h2>
-        <label className="text-[14px]">
-          ผู้เซ็นรับ (สโตร์หรือโฟร์แมน)
-          <input
-            className={`${field} ${showErr("receiver", check.errors.receiver) ? bad : ""}`}
-            value={receiverName}
-            onChange={(e) => setReceiverName(e.target.value)}
-            onBlur={() => touch("receiver")}
-          />
-          <Err msg={showErr("receiver", check.errors.receiver)} />
-        </label>
-        <label className="flex min-h-11 items-center gap-3 self-end text-[14px]">
-          <input
-            type="checkbox"
-            className="h-6 w-6"
-            checked={receivedSigned}
-            onChange={(e) => {
-              setReceivedSigned(e.target.checked);
-              touch("receiver");
-            }}
-          />
-          ใบกระดาษมีลายเซ็นแล้ว
-        </label>
-        {!edit && (
-          <div className="flex flex-col gap-1 text-[14px] sm:col-span-2">
-            <label htmlFor="slip-photo">
-              รูปใบเซ็น <span className="text-muted">(ไม่บังคับ แนบทีหลังที่หน้าใบก็ได้)</span>
-            </label>
-            <input
-              id="slip-photo"
-              type="file"
-              accept="image/*"
-              className={`${field} py-2`}
-              onChange={async (e) => {
-                const f = e.target.files?.[0];
-                setSlipPhotoError(null);
-                if (!f) return (setSlipPhoto(null), setSlipPhotoName(""));
-                const small = await shrinkImage(f);
-                if (!small) return (setSlipPhoto(null), setSlipPhotoName(""), setSlipPhotoError("เปิดรูปนี้ไม่ได้ เลือกไฟล์ JPG หรือ PNG"));
-                setSlipPhoto(small);
-                setSlipPhotoName(f.name);
-              }}
-            />
-            {slipPhotoName && <span className="text-[13px] text-muted">แนบแล้ว: {slipPhotoName}</span>}
-            {slipPhotoError && (
-              <span role="alert" className="text-[13px] text-repair">
-                {slipPhotoError}
+      <div className="flex flex-wrap items-start gap-6">
+        <Card className="min-w-0 flex-[999_1_620px] p-7">
+          <div className="flex flex-col gap-7">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-2">
+              <h2 className="font-display text-xl font-medium leading-[1.4]">ใบเบิกน้ำมันเชื้อเพลิง</h2>
+              <span className="text-muted">
+                {edit
+                  ? `กำลังแก้ใบที่บันทึกไว้${edit.savedAt ? `เมื่อ ${thaiShort(new Date(edit.savedAt).toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" }))}` : ""} การแก้ทุกครั้งเก็บในประวัติของใบ`
+                  : `ช่องเรียงตามใบกระดาษจากบนลงล่าง${keyedToday ? ` วันนี้คีย์แล้ว ${keyedToday} ใบ` : ""}`}
               </span>
-            )}
-          </div>
-        )}
-        {check.warnings
-          .filter((w) => w.kind === "unsigned")
-          .map((w, k) => (
-            <p key={k} className="rounded-control bg-safety-soft px-3 py-2 text-[13px] sm:col-span-2">
-              คำเตือน: {w.message} ยังบันทึกได้
-            </p>
-          ))}
-        <p className="text-[13px] text-muted sm:col-span-2">การแนบรูปใบจ่ายและรูปมิเตอร์ยังไม่เปิดใช้ในรุ่นนี้</p>
-      </Card>
+            </div>
 
-      <Card className="flex flex-col gap-4 p-5">
-        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2">
-          <div>
-            <div className="text-[13px] text-muted">ยอดของใบนี้</div>
-            <div className="font-display text-2xl">
-              {badLiters ? (
-                <span className="text-[15px] text-muted">แก้ลิตรให้ถูกต้องก่อน</span>
+            <section className="flex flex-col gap-3.5" aria-labelledby="h-head">
+              <h3 id="h-head" className={sub}>
+                หัวใบ
+              </h3>
+              <div className="flex flex-wrap gap-4">
+                <div className="flex min-w-0 flex-[1_1_120px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-book">เล่มที่</Lbl>
+                  <input
+                    id="n-book"
+                    className={`${field} ${showErr("book", check.errors.book) ? bad : ""}`}
+                    value={bookNo}
+                    onChange={(e) => setBookNo(e.target.value)}
+                    onBlur={() => touch("book")}
+                    onFocus={(e) => e.target.select()}
+                    inputMode="numeric"
+                    autoFocus={!edit && !initial.bookNo}
+                  />
+                  <Err msg={showErr("book", check.errors.book)} />
+                </div>
+                <div className="flex min-w-0 flex-[1_1_120px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-no">เลขที่</Lbl>
+                  <input
+                    id="n-no"
+                    className={`${field} ${showErr("doc", check.errors.doc) ? bad : ""}`}
+                    value={docNo}
+                    onChange={(e) => setDocNo(e.target.value)}
+                    onBlur={() => touch("doc")}
+                    onFocus={(e) => e.target.select()}
+                    inputMode="numeric"
+                    autoFocus={!edit && !!initial.bookNo}
+                  />
+                  <Err msg={showErr("doc", check.errors.doc)} />
+                  {server?.duplicateIssueId && (
+                    <Link href={`/issues/${server.duplicateIssueId}`} className="text-[13px] text-repair underline" target="_blank">
+                      เปิดดูใบเดิม
+                    </Link>
+                  )}
+                </div>
+                <div className="flex min-w-0 flex-[1_1_140px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-date">วันที่ {issueDate && <span className="text-muted">({thaiShort(issueDate)})</span>}</Lbl>
+                  <input
+                    id="n-date"
+                    type="date"
+                    className={`${field} ${showErr("date", check.errors.date) ? bad : ""}`}
+                    value={issueDate}
+                    onChange={(e) => setIssueDate(e.target.value)}
+                    onBlur={() => touch("date")}
+                  />
+                  <Err msg={showErr("date", check.errors.date)} />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <div className="flex min-w-0 flex-[3_1_260px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-proj">โครงการ</Lbl>
+                  <input
+                    id="n-proj"
+                    className={`${field} ${showErr("project", check.errors.project) ? bad : ""}`}
+                    list="project-list"
+                    value={projectText}
+                    onChange={(e) => setProjectText(e.target.value)}
+                    onBlur={() => touch("project")}
+                    placeholder="พิมพ์รหัสหรือชื่อเพื่อค้นหา"
+                  />
+                  <datalist id="project-list">
+                    {projects.map((p) => (
+                      <option key={p.id} value={projectLabel(p)} />
+                    ))}
+                  </datalist>
+                  <Err msg={showErr("project", check.errors.project)} />
+                </div>
+                <div className="flex min-w-0 flex-[1_1_110px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-in" optional>
+                    เวลาเข้า
+                  </Lbl>
+                  <input id="n-in" type="time" className={field} value={timeIn} onChange={(e) => setTimeIn(e.target.value)} />
+                </div>
+                <div className="flex min-w-0 flex-[1_1_110px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-out" optional>
+                    เวลาออก
+                  </Lbl>
+                  <input id="n-out" type="time" className={field} value={timeOut} onChange={(e) => setTimeOut(e.target.value)} />
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-4">
+                <div className="flex min-w-0 flex-[1_1_220px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-drv" optional>
+                    พขร.เติมน้ำมัน
+                  </Lbl>
+                  <input id="n-drv" className={field} value={fuelDriver} onChange={(e) => setFuelDriver(e.target.value)} />
+                </div>
+                <div className="flex min-w-0 flex-[1_1_220px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-op" optional>
+                    พขร.ดูแลเครื่องจักร
+                  </Lbl>
+                  <input id="n-op" className={field} value={machineDriver} onChange={(e) => setMachineDriver(e.target.value)} />
+                </div>
+              </div>
+            </section>
+
+            <section className="flex flex-col gap-3.5" aria-labelledby="h-lines">
+              <h3 id="h-lines" className={sub}>
+                รายการเครื่องจักร
+              </h3>
+              <datalist id="machine-list">
+                {machines.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
+              <div className="overflow-x-auto">
+                <table className="t top">
+                  <thead>
+                    <tr>
+                      <th className="w-9">ลำดับ</th>
+                      <th>รายการหรือรหัสเครื่องจักร</th>
+                      <th className="w-[220px]">
+                        ชั่วโมงการทำงาน <span className="font-normal">(ไม่บังคับ)</span>
+                      </th>
+                      <th className="w-[170px]">จำนวนน้ำมัน (ลิตร)</th>
+                      <th className="w-14">
+                        <span className="sr-only">ลบบรรทัด</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((l, i) => {
+                      const le = check.errors.lines[i];
+                      const warns = check.warnings.filter((w) => w.line === i);
+                      const hoursWarn = warns.filter((w) => w.kind === "hours");
+                      const litersWarn = warns.filter((w) => w.kind !== "hours");
+                      return (
+                        <tr key={i}>
+                          <td className="pt-[22px] text-center text-muted">{i + 1}</td>
+                          <td>
+                            <input
+                              data-line={i}
+                              data-f="machine"
+                              list="machine-list"
+                              aria-label={`รายการหรือรหัสเครื่องจักร บรรทัดที่ ${i + 1}`}
+                              className={`${field} ${showErr(`m${i}`, le?.machine) ? bad : ""}`}
+                              value={l.machine}
+                              onChange={(e) => setLine(i, { machine: e.target.value })}
+                              onBlur={() => touch(`m${i}`)}
+                              placeholder="พิมพ์เพื่อค้นหา หรือเพิ่มเครื่องใหม่"
+                            />
+                            <Err msg={showErr(`m${i}`, le?.machine)} />
+                          </td>
+                          <td>
+                            <input
+                              data-line={i}
+                              data-f="hours"
+                              inputMode="decimal"
+                              aria-label={`ชั่วโมงการทำงาน บรรทัดที่ ${i + 1}`}
+                              className={`${field} text-right tabular-nums`}
+                              value={l.hourMeter}
+                              onChange={(e) => setLine(i, { hourMeter: e.target.value })}
+                            />
+                            {hoursWarn.map((w, k) => (
+                              <Warn key={k}>{w.message} ตรวจกับใบอีกครั้ง ยังบันทึกได้</Warn>
+                            ))}
+                          </td>
+                          <td>
+                            <input
+                              data-line={i}
+                              data-f="liters"
+                              inputMode="decimal"
+                              aria-label={`จำนวนน้ำมัน (ลิตร) บรรทัดที่ ${i + 1}`}
+                              className={`${field} text-right tabular-nums ${showErr(`l${i}`, le?.liters) ? bad : ""}`}
+                              value={l.liters}
+                              onChange={(e) => setLine(i, { liters: e.target.value })}
+                              onBlur={() => touch(`l${i}`)}
+                            />
+                            <Err msg={showErr(`l${i}`, le?.liters)} />
+                            {litersWarn.map((w, k) => (
+                              <Warn key={k}>{w.message} ตรวจกับใบอีกครั้ง ยังบันทึกได้</Warn>
+                            ))}
+                          </td>
+                          <td>
+                            <button type="button" aria-label={`ลบบรรทัดที่ ${i + 1}`} onClick={() => removeLine(i)} className="min-h-11 px-3 text-earth underline hover:text-ink">
+                              ลบ
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button type="button" onClick={addLine}>
+                  เพิ่มบรรทัด
+                </Button>
+                <span className="text-sm text-muted">
+                  หรือกด <Kbd>Enter</Kbd> ที่ช่องลิตรของบรรทัดสุดท้าย
+                </span>
+              </div>
+            </section>
+
+            <section className="flex flex-col gap-3.5" aria-labelledby="h-sign">
+              <h3 id="h-sign" className={sub}>
+                เซ็นรับและรูปแนบ
+              </h3>
+              <div className="flex flex-wrap items-start gap-4">
+                <div className="flex min-w-0 flex-[1_1_260px] flex-col gap-1.5">
+                  <Lbl htmlFor="n-sign">ผู้เซ็นรับ (สโตร์หรือโฟร์แมน)</Lbl>
+                  <input
+                    id="n-sign"
+                    className={`${field} ${showErr("receiver", check.errors.receiver) ? bad : ""}`}
+                    value={receiverName}
+                    onChange={(e) => setReceiverName(e.target.value)}
+                    onBlur={() => touch("receiver")}
+                  />
+                  <Err msg={showErr("receiver", check.errors.receiver)} />
+                </div>
+                <div className="flex min-h-11 flex-[1_1_260px] flex-col justify-center sm:pt-[27px]">
+                  <div className="flex min-h-11 items-center gap-2.5">
+                    <input
+                      id="n-signed"
+                      type="checkbox"
+                      className="size-5"
+                      checked={receivedSigned}
+                      onChange={(e) => {
+                        setReceivedSigned(e.target.checked);
+                        touch("receiver");
+                      }}
+                    />
+                    <label htmlFor="n-signed">ใบกระดาษมีลายเซ็นแล้ว</label>
+                  </div>
+                  {unsignedWarn && <Warn>{unsignedWarn.message} ยังบันทึกได้</Warn>}
+                </div>
+              </div>
+              {!edit ? (
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-sm">
+                    รูปแนบ <span className="text-muted">(ไม่บังคับ)</span>
+                  </span>
+                  <div
+                    className="flex flex-wrap items-center gap-3 rounded-control border border-dashed border-idle bg-page p-4"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      void takePhoto(e.dataTransfer.files?.[0]);
+                    }}
+                  >
+                    <input id="slip-photo" type="file" accept="image/*" aria-label="รูปใบเซ็น" className="peer sr-only" onChange={(e) => void takePhoto(e.target.files?.[0])} />
+                    <label htmlFor="slip-photo" className={`${linkButton("secondary")} cursor-pointer peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-earth`}>
+                      เลือกรูป
+                    </label>
+                    <span className="text-sm text-muted">{slipPhotoName ? `แนบแล้ว: ${slipPhotoName}` : "รูปใบจ่ายที่เซ็นแล้ว 1 รูป หรือลากไฟล์มาวาง แนบทีหลังที่หน้าใบก็ได้"}</span>
+                  </div>
+                  {slipPhotoError && (
+                    <span role="alert" className="text-[13px] text-repair">
+                      {slipPhotoError}
+                    </span>
+                  )}
+                </div>
               ) : (
-                <>
-                  <span className="rounded bg-safety-soft px-1.5">{formatLiters(totalLiters)}</span> ลิตร
-                </>
+                <p className="text-sm text-muted">รูปใบเซ็นแนบ เปลี่ยน หรือลบได้ที่หน้าใบจ่าย</p>
+              )}
+            </section>
+          </div>
+        </Card>
+
+        <div className="flex min-w-0 flex-[1_1_300px] flex-col gap-4">
+          <section aria-label="ยอดของใบนี้" className="flex flex-col gap-3.5 rounded-card bg-tank px-6 pb-6 pt-[22px] text-white">
+            <h2 className="font-display text-lg font-medium leading-[1.4] text-page">ยอดของใบนี้</h2>
+            {badLiters ? (
+              <span className="text-[15px] text-tank-text">แก้ลิตรให้ถูกต้องก่อน</span>
+            ) : (
+              <div className="flex items-baseline gap-2">
+                <span className="font-display text-[56px] font-semibold leading-none text-safety">{formatLiters(totalLiters)}</span>
+                <span className="font-display text-xl text-page">ลิตร</span>
+              </div>
+            )}
+            <div className="flex flex-col gap-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-tank-text">ราคาวันที่ {issueDate ? thaiShort(issueDate) : "-"}</span>
+                <span>{price === null ? "ยังไม่มีราคา" : `${formatBaht(price)} บาท/ลิตร`}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3 border-t border-white/16 pt-3">
+                <span className="text-tank-text">ยอดเงิน</span>
+                {badLiters ? (
+                  <span className="font-display text-2xl font-medium">-</span>
+                ) : totalAmount === null ? (
+                  <Pill tone="wait">รอราคา</Pill>
+                ) : (
+                  <span className="font-display text-2xl font-medium">{formatBaht(totalAmount)} บาท</span>
+                )}
+              </div>
+              {price === null && issueDate && (
+                <span className="text-sm text-tank-text">
+                  บันทึกลิตรได้เลย ยอดเงินจะคิดให้เมื่อมีบิลซื้อที่ลงวันที่ไม่เกินวันนี้ของใบ{" "}
+                  <Link href={`/purchases?month=${issueDate.slice(0, 7)}&new=purchase&date=${issueDate}`} className="text-white underline">
+                    บันทึกการซื้อ
+                  </Link>
+                </span>
               )}
             </div>
-          </div>
-          <div>
-            <div className="text-[13px] text-muted">
-              ราคาวันที่ {issueDate ? thaiShort(issueDate) : "-"}
-            </div>
-            <div>{price === null ? "ยังไม่มีราคา" : `${formatBaht(price)} บาท/ลิตร`}</div>
-          </div>
-          <div>
-            <div className="text-[13px] text-muted">ยอดเงิน</div>
-            <div className="font-display text-xl">{badLiters ? "-" : totalAmount === null ? "รอราคา" : `${formatBaht(totalAmount)} บาท`}</div>
-          </div>
-        </div>
-        {price === null && issueDate && (
-          <p className="text-[13px] text-muted">
-            บันทึกลิตรได้เลย ยอดเงินจะคิดให้เมื่อมีราคาของวันนั้น (ตั้งราคาของวันนั้นได้ที่หน้าซื้อน้ำมันเข้า)
-          </p>
-        )}
-        {saveError && (
-          <p role="alert" className="text-[14px] text-repair">
-            {saveError}
-          </p>
-        )}
-        {attempted && !check.ok && (
-          <p role="alert" className="text-[14px] text-repair">
-            ยังบันทึกไม่ได้ แก้ช่องที่มีข้อความสีแดงในฟอร์มก่อน
-          </p>
-        )}
-        <div className="flex flex-wrap items-center gap-3">
-          {edit ? (
-            <Button type="button" variant="primary" disabled={saving} onClick={() => save("done")}>
-              บันทึกการแก้ไข
-            </Button>
-          ) : (
-            <>
-              <Button type="button" variant="primary" disabled={saving} onClick={() => save("next")}>
-                บันทึกและคีย์ใบถัดไป
+          </section>
+
+          <div className="flex flex-col gap-3">
+            {edit ? (
+              <Button type="button" variant="primary" className="w-full" disabled={saving} onClick={() => save("done")}>
+                บันทึกการแก้ไข
               </Button>
-              <Button type="button" disabled={saving} onClick={() => save("done")}>
-                บันทึก
-              </Button>
-            </>
-          )}
-          <Link href={edit ? `/issues/${edit.id}` : "/issues"} className={linkButton()}>
-            {edit ? "ไม่แก้แล้ว" : "ยกเลิก ไม่บันทึกใบนี้"}
+            ) : (
+              <>
+                <Button type="button" variant="primary" className="w-full" disabled={saving} onClick={() => save("next")}>
+                  บันทึกและคีย์ใบถัดไป
+                </Button>
+                <Button type="button" className="w-full" disabled={saving} onClick={() => save("done")}>
+                  บันทึก
+                </Button>
+              </>
+            )}
+            {saving && (
+              <p role="status" className="flex items-center justify-center gap-2 text-sm text-muted">
+                <span aria-hidden="true" className="size-4 animate-spin rounded-full border-2 border-idle border-t-transparent" />
+                กำลังบันทึก รอสักครู่ ไม่ต้องกดซ้ำ
+              </p>
+            )}
+            {saveError && (
+              <p role="alert" className="text-sm text-repair">
+                {saveError}
+              </p>
+            )}
+            {attempted && !check.ok && (
+              <p role="alert" className="text-sm text-repair">
+                ยังบันทึกไม่ได้ แก้ช่องที่มีข้อความสีแดงในฟอร์มก่อน
+              </p>
+            )}
+          </div>
+          <Link href={edit ? `/issues/${edit.id}` : "/issues"} className="self-center py-1.5 text-earth underline hover:text-ink">
+            {edit ? "ยกเลิกการแก้ไข" : "ยกเลิก ไม่บันทึกใบนี้"}
           </Link>
+          {!edit && <p className="text-sm text-muted">ใบถัดไปจะเปิดเป็นฟอร์มเปล่า คงวันที่เดิม และ{nextNo}</p>}
+
+          <Card className="p-5">
+            <div className="flex flex-col gap-2.5 text-sm">
+              <h2 className="font-display text-xl font-medium leading-[1.4]">คีย์ลัด</h2>
+              <div className="flex items-center gap-2.5">
+                <Kbd>Tab</Kbd>
+                <span>ไปช่องถัดไป</span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <Kbd>Enter</Kbd>
+                <span>เพิ่มบรรทัดใหม่ เมื่ออยู่ที่ช่องลิตรบรรทัดสุดท้าย</span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <Kbd>Ctrl + Enter</Kbd>
+                <span>บันทึก</span>
+              </div>
+            </div>
+          </Card>
         </div>
-        <p className="text-[13px] text-muted">
-          ใบถัดไปจะเปิดเป็นฟอร์มเปล่า คงวันที่เดิม และใส่เลขที่ถัดไปให้ · คีย์ลัด: Tab ไปช่องถัดไป · Enter เพิ่มบรรทัดใหม่ · Ctrl + Enter บันทึก
-        </p>
-      </Card>
+      </div>
     </form>
   );
 }

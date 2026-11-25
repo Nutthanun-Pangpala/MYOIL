@@ -10,6 +10,7 @@ const sel = "h-11 w-full rounded-control border border-idle bg-card px-3";
 /** month + (optionally) one project; choosing either reloads the page with the new query */
 export function MonthlyFilters({ month, months, projectId, projects }: Props) {
   const router = useRouter();
+  const thisMonth = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" }).slice(0, 7);
   const go = (m: string, p: string | null) => router.push(`/monthly?month=${m}${p ? `&project=${p}` : ""}`);
   return (
     <>
@@ -29,12 +30,13 @@ export function MonthlyFilters({ month, months, projectId, projects }: Props) {
       )}
       <div className="flex min-w-0 flex-[0_0_200px] flex-col gap-1.5">
         <label htmlFor="mo-month" className="text-sm">
-          เดือน
+          เดือนหรือรอบ
         </label>
         <select id="mo-month" value={month} onChange={(e) => go(e.target.value, projectId)} className={sel}>
           {months.map((m) => (
             <option key={m} value={m}>
               {thaiMonthShort(`${m}-01`)}
+              {m === thisMonth ? " (รอบนี้)" : ""}
             </option>
           ))}
         </select>

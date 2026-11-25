@@ -21,7 +21,7 @@ function StatusPill({ status }: { status: TankLevel["status"] }) {
   // one short word; what to do about it is in the to-do list under this panel
   const [text, ok] = status === "ok" ? ["ปกติ", true] : status === "low" ? ["ใกล้หมด ควรเติม", false] : ["ติดลบ", false];
   return (
-    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full py-[3px] pl-2.5 pr-3 text-[13px] font-semibold ${ok ? "bg-working-soft text-working" : "bg-repair-soft text-repair"}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full py-[3px] pl-2.5 pr-3 text-[13px] font-medium ${ok ? "bg-working-soft text-working-ink" : "bg-repair-soft text-repair-ink"}`}>
       <span aria-hidden className={`h-2 w-2 rounded-full ${ok ? "bg-working" : "bg-repair"}`} />
       {text}
     </span>

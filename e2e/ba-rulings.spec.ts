@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { keyIssue, login, resetData } from "./helpers";
+import { keyIssue, login, recordPurchase, resetData } from "./helpers";
 
 // BA rulings of 22 Nov (sheet "MYOIL: คำตัดสิน BA จากผลทดสอบ"): OBS-13, OBS-17, OBS-18
 
@@ -68,21 +68,15 @@ test("OBS-13: a signed slip with no price blocks closing the cycle until the day
   await page.getByRole("button", { name: "บันทึกว่าเซ็นรับแล้ว" }).click();
   await expect(page.getByText("ผู้เซ็นรับ: - → สมชาย")).toBeVisible();
   await page.goto("/issues?q=8");
-  await expect(page.getByRole("row").filter({ hasText: "8/1" })).not.toContainText("อยู่ในใบแจ้งแล้ว");
+  await expect(page.getByRole("row").filter({ hasText: "8 / 1" })).not.toContainText("อยู่ในใบแจ้งแล้ว");
 
   await page.goto("/invoices");
   await page.getByRole("button", { name: /^ปิดรอบ/ }).click();
   await page.getByRole("region", { name: /^ปิดรอบ/ }).getByRole("button", { name: /^ปิดรอบ/ }).click();
   await expect(page.getByText(/ปิดรอบไม่ได้ มีใบที่เซ็นรับแล้วแต่ยังไม่มีราคา 1 ใบ/)).toBeVisible();
 
-  // set the price of that day, then closing works
-  await page.goto("/purchases?month=2026-01");
-  await page.getByRole("link", { name: "ตั้งราคาของวันที่ไม่มีการซื้อ" }).click();
-  const price = page.getByRole("form", { name: "ตั้งราคาประจำวัน" });
-  await price.getByLabel("วันที่").fill("2026-01-15");
-  await price.getByLabel("ราคาต่อลิตร (บาท)").fill("30");
-  await price.getByRole("button", { name: "บันทึก", exact: true }).click();
-  await expect(page.getByRole("row").filter({ hasText: "ตั้งเอง วันนั้นไม่มีการซื้อ" })).toContainText("30.00");
+  // record the purchase bill of that day (the slip takes its price), then closing works
+  await recordPurchase(page, { date: "2026-01-15", liters: "1000", price: "30" });
   await page.goto("/invoices");
   await page.getByRole("button", { name: /^ปิดรอบ/ }).click();
   await page.getByRole("region", { name: /^ปิดรอบ/ }).getByRole("button", { name: /^ปิดรอบ/ }).click();

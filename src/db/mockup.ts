@@ -13,6 +13,8 @@ import { closeCycle } from "../server/cycles/cycle-service";
 import { setLedgerNote, setStockCheck } from "../server/ledger/ledger-service";
 import type { IssueInput } from "../domain/issue-check";
 import type { Session } from "../lib/session";
+import { randomUUID } from "node:crypto";
+import { addStop, fillStop, routeForDate, skipStop } from "../server/routes/route-service";
 
 const DAYS = 35;
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -117,6 +119,25 @@ async function main() {
   await setLedgerNote(session, daysAgo(10), "รถบรรทุกน้ำมันมาส่งช้า");
   await setLedgerNote(session, daysAgo(3), "ปิดถังตรวจสอบ");
   await setStockCheck(session, daysAgo(3), 4200);
+
+  // ── the fuel truck's routes (driver screens, 25 Nov 2026): yesterday done (2 filled, 1 skipped), today 3 stops to go ──
+  await db.update(schema.appSettings).set({ tankCapacityLiters: 12000 }).where(eq(schema.appSettings.id, 1));
+  const yesterday = daysAgo(1);
+  const ySlips = await db.select({ id: schema.fuelIssues.id, projectId: schema.fuelIssues.projectId }).from(schema.fuelIssues).where(eq(schema.fuelIssues.issueDate, yesterday));
+  const live = ySlips.filter((x) => x.projectId).slice(0, 2);
+  for (const sl of live) await addStop(user.id, yesterday, sl.projectId!, null);
+  await addStop(user.id, yesterday, pid.DEMO2, "เติมเครื่องปั่นไฟ G1");
+  const y = await routeForDate(yesterday);
+  if (y) {
+    await db.transaction(async (tx) => {
+      for (const [i, sl] of live.entries()) await fillStop(tx, y.stops[i].id, sl.id);
+    });
+    const last = y.stops[y.stops.length - 1];
+    await skipStop(last.id, { skipRef: randomUUID(), reason: "เข้าหน้างานไม่ได้ / หน้างานปิด", skippedAt: `${yesterday}T15:40:00+07:00`, driver: { bookcareUserId: "", name: "สุชาติ แก้วใส (demo)" } });
+  }
+  await addStop(user.id, daysAgo(0), pid.DEMO1, "เติม PC210 ก่อน 9 โมง");
+  await addStop(user.id, daysAgo(0), pid.DEMO2, null);
+  await addStop(user.id, daysAgo(0), pid.YARD, "รอบบ่าย เติมรถบรรทุก 2 คัน");
 
   console.log(`mockup ready: ${n} purchases, ${made.length} slips. demo logins as in db:seed (password myoil1234)`);
 }

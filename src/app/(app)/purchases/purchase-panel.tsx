@@ -2,10 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Button, Card } from "@/components/ui";
-import { completePurchase } from "@/domain/purchase-calc";
+import { Button, Card, linkButton } from "@/components/ui";
+import { FIELD_NAME, completePurchase } from "@/domain/purchase-calc";
 import { formatBaht } from "@/lib/format";
-import { savePriceAction, savePurchaseAction, updatePurchaseAction } from "./actions";
+import { savePurchaseAction, updatePurchaseAction } from "./actions";
 import { shrinkImage } from "@/lib/image-shrink";
 
 const toNum = (s: string): number | null => {
@@ -21,7 +21,7 @@ const input = "h-11 w-full rounded-control border bg-card px-3";
 const label = "text-sm";
 const optional = <span className="text-muted">(ไม่บังคับ)</span>;
 
-/** the form on the right of the page (design 6.6): opened by ?new=purchase|price, closes back to the list */
+/** the form on the right of the page (design 6.6): opened by ?new=purchase, closes back to the list */
 export function PurchasePanel({
   mode,
   month,
@@ -30,7 +30,8 @@ export function PurchasePanel({
   initialPrice,
   editing,
 }: {
-  mode: "purchase" | "price";
+  /** only purchases now: the daily price list was cut on 25 Nov 2026 (a slip uses the price of its bill) */
+  mode: "purchase";
   /** a saved purchase being changed (OBS-18) */
   editing?: { id: string; date: string; liters: number; price: number; amount: number; billNo: string; note: string };
   month: string;
@@ -71,9 +72,13 @@ export function PurchasePanel({
   function submit(e: { preventDefault(): void }, confirmed = false) {
     e.preventDefault();
     setError(null);
+    // "12a" is not a number: say so at that box instead of treating it as left empty (OBS-27)
+    for (const [field, text] of [["liters", liters], ["price", price], ["amount", amount]] as const) {
+      if ((isPurchase || field === "price") && text.trim() !== "" && toNum(text) === null) return setError({ field, text: `${FIELD_NAME[field]} ต้องเป็นตัวเลข` });
+    }
     start(async () => {
       const body = { date, liters: toNum(liters), price: toNum(price), amount: toNum(amount), billNo, note, billPhoto: photo, confirmed };
-      const r = isPurchase ? (editing ? await updatePurchaseAction(editing.id, body) : await savePurchaseAction(body)) : await savePriceAction({ date, price: toNum(price) });
+      const r = editing ? await updatePurchaseAction(editing.id, body) : await savePurchaseAction(body);
       if (!r.ok) return r.confirm ? setOdd(r.confirm) : setError({ field: r.field, text: r.error });
       router.refresh();
       if (r.warnings.length > 0) return setNotes(r.warnings);
@@ -82,7 +87,7 @@ export function PurchasePanel({
   }
 
   const border = (f: Err["field"]) => (error?.field === f ? "border-repair" : "border-idle");
-  const title = isPurchase ? (editing ? "แก้ไขการซื้อ" : "บันทึกการซื้อ") : "ตั้งราคาประจำวัน";
+  const title = editing ? "แก้ไขการซื้อ" : "บันทึกการซื้อ";
 
   return (
     <Card className="min-w-0 flex-[1_1_340px] p-6">
@@ -140,12 +145,15 @@ export function PurchasePanel({
             </div>
             {!editing && (
             <div className="flex min-w-0 flex-col gap-1.5">
-              <label htmlFor="p-photo" className={label}>
+              {/* design 6.6: a "เลือกรูป" button, not the browser's file box */}
+              <span id="p-photo-label" className={label}>
                 รูปบิล {optional}
-              </label>
+              </span>
+              <div className="flex flex-wrap items-center gap-3">
               <input
                 id="p-photo"
                 type="file"
+                aria-labelledby="p-photo-label"
                 accept="image/jpeg,image/png"
                 onChange={async (e) => {
                   const f = e.target.files?.[0];
@@ -156,9 +164,13 @@ export function PurchasePanel({
                   setPhoto(small);
                   setPhotoName(f.name);
                 }}
-                className={`${input} border-idle py-2`}
+                className="peer sr-only"
               />
+              <label htmlFor="p-photo" className={`${linkButton("secondary")} cursor-pointer peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-earth`}>
+                เลือกรูป
+              </label>
               {photoName && <span className="text-[13px] text-muted">แนบแล้ว: {photoName}</span>}
+              </div>
             </div>
             )}
           </>

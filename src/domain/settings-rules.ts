@@ -50,6 +50,12 @@ export function validateUser(u: { name: string; email: string; role: string; pro
   return e;
 }
 
+/** same limit as a name typed on the driver's phone (BUG-06: a longer code was cut off without a word) */
+export const MACHINE_CODE_MAX = 60;
+
 export function validateMachine(m: { code: string }): { code?: string } {
-  return m.code.trim() ? {} : { code: "ใส่รหัสหรือทะเบียน" };
+  const code = m.code.trim().replace(/\s+/g, " ");
+  if (!code) return { code: "ใส่รหัสหรือทะเบียน" };
+  if (code.length > MACHINE_CODE_MAX) return { code: `รหัสหรือทะเบียนยาวได้ไม่เกิน ${MACHINE_CODE_MAX} ตัวอักษร (ตอนนี้ ${code.length} ตัว)` };
+  return {};
 }

@@ -59,4 +59,8 @@ describe("validateMachine", () => {
     expect(validateMachine({ code: "  " }).code).toBeDefined();
     expect(validateMachine({ code: "PC210" })).toEqual({});
   });
+  it("refuses a code longer than 60 characters instead of cutting it (BUG-06)", () => {
+    expect(validateMachine({ code: "A".repeat(60) })).toEqual({});
+    expect(validateMachine({ code: "A".repeat(61) }).code).toContain("ไม่เกิน 60 ตัวอักษร");
+  });
 });

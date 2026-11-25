@@ -1,9 +1,12 @@
-import { and, asc, eq, isNull, ne } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { Session } from "@/lib/session";
-import { loadForChange, type ChangeResult } from "./issue-service";
+import { sumLiters } from "@/domain/money";
+import { visibleProjectIds } from "../projects/project-scope";
+import { getIssueForEdit, loadForChange, updateIssue, type ChangeResult } from "./issue-service";
+import { withDateFlags } from "@/domain/bookcare-flags";
 
-const { fuelIssues, fuelIssueLines, fuelIssueLinePhotos, fuelIssueAudit, machines, users } = schema;
+const { fuelIssues, fuelIssueLines, fuelIssueLinePhotos, fuelIssueAudit, machines, projects, users } = schema;
 
 export type ReviewLine = {
   lineId: string;
@@ -63,7 +66,7 @@ export async function getReview(issueId: string): Promise<ReviewInfo | null> {
   const known = anyHeld ? await db.select({ id: machines.id, code: machines.code }).from(machines).where(eq(machines.pendingReview, false)).orderBy(asc(machines.code)) : [];
   return {
     status: h.i.reviewStatus as ReviewInfo["status"],
-    flags: h.i.flags,
+    flags: withDateFlags(h.i.flags, h.i.issueDate, h.i.receivedAt?.toISOString() ?? null),
     confirmedWarnings: h.i.confirmedWarnings,
     driverName: h.i.fuelDriver,
     recordedAt: h.i.recordedAt?.toISOString() ?? null,
@@ -133,4 +136,88 @@ export async function countPendingReview(cycleId?: string): Promise<number> {
     .from(fuelIssues)
     .where(and(eq(fuelIssues.reviewStatus, "pending_review"), eq(fuelIssues.source, "mobile"), isNull(fuelIssues.cancelledAt), cycleId ? eq(fuelIssues.claimCycleId, cycleId) : undefined));
   return rows.length;
+}
+
+// ───────────── the "ตรวจใบมือถือ" desk ─────────────
+
+export type PendingCheck = {
+  id: string;
+  bookNo: string;
+  docNo: string;
+  projectRef: string;
+  projectName: string;
+  issueDate: string;
+  timeIn: string | null;
+  timeOut: string | null;
+  recordedAt: string | null;
+  receivedAt: string | null;
+  liters: number;
+  machines: number;
+  signed: boolean;
+  receiverName: string | null;
+  flags: string[];
+  confirmedWarnings: string[];
+};
+
+/** phone slips nobody has checked yet, oldest first (design: "เก่าสุดอยู่บน") */
+export async function listPendingChecks(session: Session): Promise<PendingCheck[]> {
+  const scope = await visibleProjectIds(session);
+  if (scope && scope.length === 0) return [];
+  const heads = await db
+    .select({ i: fuelIssues, projectRef: projects.refCode, projectName: projects.name })
+    .from(fuelIssues)
+    .innerJoin(projects, eq(projects.id, fuelIssues.projectId))
+    .where(and(eq(fuelIssues.source, "mobile"), eq(fuelIssues.reviewStatus, "pending_review"), isNull(fuelIssues.cancelledAt), scope ? inArray(fuelIssues.projectId, scope) : undefined))
+    .orderBy(sql`coalesce(${fuelIssues.recordedAt}, ${fuelIssues.receivedAt}, ${fuelIssues.createdAt}) asc`)
+    .limit(500);
+  if (heads.length === 0) return [];
+  const lines = await db
+    .select({ issueId: fuelIssueLines.issueId, liters: fuelIssueLines.liters })
+    .from(fuelIssueLines)
+    .where(inArray(fuelIssueLines.issueId, heads.map((h) => h.i.id)));
+  return heads.map(({ i, projectRef, projectName }) => {
+    const ls = lines.filter((l) => l.issueId === i.id);
+    return {
+      id: i.id,
+      bookNo: i.bookNo,
+      docNo: i.docNo,
+      projectRef,
+      projectName,
+      issueDate: i.issueDate,
+      timeIn: i.timeIn,
+      timeOut: i.timeOut,
+      recordedAt: i.recordedAt?.toISOString() ?? null,
+      receivedAt: i.receivedAt?.toISOString() ?? null,
+      liters: sumLiters(ls.map((l) => l.liters)),
+      machines: ls.length,
+      signed: i.receivedSigned,
+      receiverName: i.receiverName,
+      flags: withDateFlags(i.flags, i.issueDate, i.receivedAt?.toISOString() ?? null),
+      confirmedWarnings: i.confirmedWarnings,
+    };
+  });
+}
+
+/** "ตรวจแล้ววันนี้ n ใบ" */
+export async function countCheckedToday(today: string): Promise<number> {
+  const rows = await db
+    .select({ id: fuelIssues.id })
+    .from(fuelIssues)
+    .where(and(eq(fuelIssues.source, "mobile"), eq(fuelIssues.reviewStatus, "checked"), gte(fuelIssues.reviewedAt, new Date(`${today}T00:00:00+07:00`))));
+  return rows.length;
+}
+
+/**
+ * "บันทึกการแก้ และตรวจแล้ว": the meter photo shows other liters than the driver typed.
+ * Only the liters of each line change (by position); the reason goes in the history; then the slip is checked.
+ */
+export async function correctAndCheck(session: Session, id: string, liters: { position: number; liters: number }[], reason: string): Promise<ChangeResult> {
+  if (!reason.trim()) return { ok: false, message: "ใส่เหตุผลที่แก้ก่อนบันทึก" };
+  const cur = await getIssueForEdit(session, id);
+  if (!cur) return { ok: false, message: "ไม่พบใบนี้" };
+  if (cur.lock) return { ok: false, message: cur.lock };
+  const lines = cur.input.lines.map((l, i) => ({ ...l, liters: liters.find((x) => x.position === i + 1)?.liters ?? l.liters }));
+  const r = await updateIssue(session, id, { ...cur.input, lines }, reason);
+  if (!r.ok) return r;
+  return markChecked(session, id);
 }

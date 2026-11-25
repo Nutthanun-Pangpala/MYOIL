@@ -1,13 +1,14 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { appBookNo, appDocNo, purchaseFlags, type IssueRequest, type PurchaseRequest, type SignatureRequest } from "@/domain/bookcare-api";
-import { nextCycleAfter } from "@/domain/cycle";
+import { dayAfter } from "@/domain/cycle";
 import { machineKey } from "@/domain/issue-check";
 import { lineAmount, sumLiters } from "@/domain/money";
 import { completePurchase } from "@/domain/purchase-calc";
 import { cycleIdFor } from "../cycles/cycle-service";
 import { stockOn, tankCapacity } from "../ledger/ledger-service";
-import { priceForDate } from "../prices/price-queries";
+import { billForDate, priceForDate } from "../prices/price-queries";
+import { repriceOpenLines } from "../purchases/purchase-service";
 import { contentHash, decodeImage, type DecodedImage } from "./images";
 import { checkStopForIssue, fillStop, stopForIssue } from "../routes/route-service";
 
@@ -41,7 +42,7 @@ async function openCycleFor(tx: Tx, date: string): Promise<{ id: string; late: b
     const [c] = await tx.select({ status: claimCycles.status, end: claimCycles.endDate }).from(claimCycles).where(eq(claimCycles.id, id)).limit(1);
     if (c.status !== "closed") return { id, late };
     late = true;
-    id = await cycleIdFor(tx, nextCycleAfter(c.end).start);
+    id = await cycleIdFor(tx, dayAfter(c.end));
   }
   throw new Refuse(fail(400, "invalid", "หารอบเคลมที่เปิดอยู่ไม่พบ", "issueDate"));
 }
@@ -77,7 +78,8 @@ export async function receiveIssue(req: IssueRequest): Promise<Done<IssueAnswer>
   if (prior) return prior.requestHash === hash ? { ok: true, status: 200, body: issueAnswer(prior, true) } : fail(409, "ref_conflict", "ref นี้เคยส่งมาแล้วด้วยเนื้อหาอื่น");
   if (!proj) return fail(404, "unknown_project", `ไม่พบโครงการ ${req.projectRefCode} ใน MYOIL`, "projectRefCode");
 
-  const price = await priceForDate(req.issueDate);
+  const bill = await billForDate(req.issueDate); // the purchase bill this slip takes its price from
+  const price = bill?.pricePerLiter ?? null;
   const total = sumLiters(req.lines.map((l) => l.liters));
   const before = (await stockOn(req.issueDate)).liters;
   const botId = await bookcareUserId();
@@ -156,6 +158,7 @@ export async function receiveIssue(req: IssueRequest): Promise<Done<IssueAnswer>
           flags,
           confirmedWarnings: req.confirmedWarnings,
           routeStopId: req.routeStopId,
+          pricePurchaseId: bill?.id ?? null,
         })
         .returning();
       await fillStop(tx, req.routeStopId!, issue.id);
@@ -234,6 +237,7 @@ export async function receivePurchase(req: PurchaseRequest): Promise<Done<Purcha
         .returning();
       await tx.insert(purchaseBillPhotos).values({ purchaseId: row.id, mime: photo.image.mime, data: photo.image.data });
       await tx.insert(purchaseAudit).values({ purchaseId: row.id, userId: botId, action: "create", changes: null });
+      await repriceOpenLines(tx); // the driver's bill is a price at once (owner, 25 Nov 2026): open slips dated on or after it follow
       return { ok: true, status: 201, body: purchaseAnswer(row, false) };
     });
   } catch (e) {

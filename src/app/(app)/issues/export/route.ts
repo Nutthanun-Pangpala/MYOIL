@@ -1,24 +1,16 @@
 import ExcelJS from "exceljs";
-import { isIsoDate } from "@/domain/iso-date";
+import { canOpen } from "@/lib/nav";
 import { getSession } from "@/lib/session";
 import { listIssues } from "@/server/issues/issue-service";
+import { issueFiltersFrom } from "../list-filters";
 
 /** รายการใบจ่าย as .xlsx — same filters and same numbers as the list screen */
 export async function GET(req: Request) {
   const session = await getSession();
-  if (!session) return new Response("forbidden", { status: 403 });
+  if (!session || !canOpen(session.role, "/issues")) return new Response("forbidden", { status: 403 });
   const q = new URL(req.url).searchParams;
-  const date = (k: string) => (isIsoDate(q.get(k) ?? "") ? q.get(k)! : undefined);
-  const st = q.get("status");
-  const rows = await listIssues(session, {
-    from: date("from"),
-    to: date("to"),
-    projectId: q.get("project") || undefined,
-    q: q.get("q") || undefined,
-    machine: q.get("machine") || undefined,
-    unsigned: q.get("signed") === "no",
-    status: st === "cancelled" || st === "active" ? st : undefined,
-  });
+  const { badDate: _bad, ...filters } = issueFiltersFrom((k) => q.get(k)?.trim() ?? "");
+  const rows = await listIssues(session, filters);
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("ใบจ่ายน้ำมัน");

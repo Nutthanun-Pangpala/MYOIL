@@ -2,9 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdministrator } from "@/lib/session";
-import { BookcareProjectSource, bookcareConfigured, ProjectSourceError } from "@/server/projects/bookcare-source";
-import { syncProjects } from "@/server/projects/sync-projects";
-import { createUser, resetPassword, saveMachine, saveTank, setUserActive, updateCycleDates, updateUser } from "@/server/settings/settings-service";
+import { createDriver, resetDriverPin, setDriverActive, updateDriver } from "@/server/settings/driver-service";
+import { createUser, resetPassword, saveCutDay, saveMachine, saveTank, setUserActive, updateCycleDates, updateUser } from "@/server/settings/settings-service";
 
 const isId = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
 const s = (v: unknown, max = 200) => (typeof v === "string" ? v.slice(0, max) : "");
@@ -71,15 +70,42 @@ export async function updateCycleDatesAction(id: string, start: string, end: str
   return res;
 }
 
-/** pull the project list from BookCare (read-only role) — the only way `projects` changes besides the seed */
-export async function syncProjectsAction(): Promise<{ ok: boolean; message: string }> {
+// ───────────── fuel-truck drivers (phone + PIN) ─────────────
+
+export async function createDriverAction(raw: unknown) {
   await requireAdministrator();
-  if (!bookcareConfigured()) return { ok: false, message: "ยังไม่ได้เชื่อมต่อ BookCare (ยังไม่ได้ตั้ง BOOKCARE_DATABASE_URL)" };
-  try {
-    const r = await syncProjects(new BookcareProjectSource());
-    revalidatePath("/settings/projects");
-    return { ok: true, message: `ซิงก์แล้ว ${r.upserted} โครงการ` + (r.deactivated ? ` ปิด ${r.deactivated} โครงการที่ไม่มีใน BookCare แล้ว` : "") };
-  } catch (e) {
-    return { ok: false, message: e instanceof ProjectSourceError ? e.message : "ซิงก์ไม่สำเร็จ ลองอีกครั้ง" };
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return done(await createDriver({ name: s(r.name, 100), phone: s(r.phone, 30) }), "/settings/users");
+}
+
+export async function updateDriverAction(id: string, raw: unknown) {
+  await requireAdministrator();
+  if (!isId(id)) return bad;
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return done(await updateDriver(id, { name: s(r.name, 100), phone: s(r.phone, 30) }), "/settings/users");
+}
+
+export async function resetDriverPinAction(id: string) {
+  await requireAdministrator();
+  if (!isId(id)) return bad;
+  return done(await resetDriverPin(id), "/settings/users");
+}
+
+export async function setDriverActiveAction(id: string, active: boolean) {
+  await requireAdministrator();
+  if (!isId(id)) return bad;
+  return done(await setDriverActive(id, active === true), "/settings/users");
+}
+
+/** the day of the month every claim cycle is cut on (1–28), null = end of the calendar month */
+export async function saveCutDayAction(day: number | null) {
+  await requireAdministrator();
+  if (day !== null && n(day) === null) return bad;
+  const res = await saveCutDay(day);
+  if (res.ok) {
+    revalidatePath("/settings/cycles");
+    revalidatePath("/invoices");
+    revalidatePath("/", "layout");
   }
+  return res;
 }

@@ -47,16 +47,17 @@ test("the receiver's name is needed only when the paper copy is ticked as signed
   await expect(page.getByText("ใส่ชื่อผู้เซ็นรับ")).toHaveCount(0);
 });
 
-test("a slip for a day with no price waits, and is priced when the price is set", async ({ page }) => {
+test("a slip with no purchase bill before it waits, and is priced when the bill is recorded", async ({ page }) => {
   await login(page, "store");
   await keyIssue(page, { book: "2", doc: "1", date: "2026-01-15", machine: "WAITING-1", liters: "100" });
   await page.goto("/issues");
   const row = page.getByRole("row").filter({ hasText: "WAITING-1" });
   await expect(row).toContainText("รอราคา");
 
-  await page.goto("/purchases?month=2026-01&new=price");
-  const form = page.getByRole("form", { name: "ตั้งราคาประจำวัน" });
+  await page.goto("/purchases?month=2026-01&new=purchase");
+  const form = page.getByRole("form", { name: "บันทึกการซื้อ" });
   await form.getByLabel("วันที่").fill("2026-01-15");
+  await form.getByLabel("เติมเข้า (ลิตร)").fill("1000");
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(form.getByRole("status")).toContainText("ตั้งราคาให้ใบจ่ายที่รอราคาแล้ว 1 รายการ");
@@ -118,38 +119,39 @@ test.describe("changing a saved slip", () => {
   test("editing liters re-prices the slip", async ({ page }) => {
     await login(page, "store");
     await keyIssue(page, { book: "7", doc: "2", date: TODAY, machine: "PC210", liters: "10" });
-    await page.getByRole("link", { name: "แก้ไขใบนี้" }).click();
+    await page.getByRole("link", { name: "แก้ไข", exact: true }).click();
     await page.getByLabel("จำนวนน้ำมัน (ลิตร)").first().fill("20");
     await page.getByRole("button", { name: "บันทึกการแก้ไข" }).click();
     await expect(page.getByText("650.00").first()).toBeVisible(); // 20 × 32.50
     await expect(page.getByText("รายการ: PC210 10 ลิตร → PC210 20 ลิตร")).toBeVisible(); // OBS-11
-    await expect(page.getByText("แก้ไข ·").first()).toBeVisible();
+    await expect(page.getByRole("list", { name: "ประวัติการแก้ไข" })).toContainText("แก้ไข");
   });
 
   test("cancel needs a reason; a cancelled slip is out of the list count and can be restored", async ({ page }) => {
     await login(page, "store");
     await keyIssue(page, { book: "7", doc: "3", date: TODAY, machine: "PC30", liters: "10" });
-    await page.getByRole("button", { name: "ยกเลิกใบนี้" }).click();
-    await page.getByRole("button", { name: "ยืนยันยกเลิกใบ" }).click();
+    // design 6.5: "ยกเลิกใบ" opens a confirm window; the red button in it does the cancel
+    await page.getByRole("button", { name: "ยกเลิกใบ", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "ยกเลิกใบนี้" }).click();
     await expect(page.getByRole("alert").filter({ hasText: "ใส่เหตุผลที่ยกเลิก" })).toBeVisible();
     await page.getByLabel("เหตุผลที่ยกเลิก").fill("คีย์ซ้ำ");
-    await page.getByRole("button", { name: "ยืนยันยกเลิกใบ" }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "ยกเลิกใบนี้" }).click();
     await expect(page.getByText("ยกเลิกแล้ว — เหตุผล: คีย์ซ้ำ")).toBeVisible();
-    await expect(page.getByRole("link", { name: "แก้ไขใบนี้" })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "แก้ไข", exact: true })).toHaveCount(0);
 
     await page.goto("/issues?status=cancelled&machine=PC30");
-    await expect(page.getByRole("row").filter({ hasText: "7/3" })).toContainText("ยกเลิก");
+    await expect(page.getByRole("row").filter({ hasText: "7 / 3" })).toContainText("ยกเลิก");
 
-    await page.getByRole("link", { name: "7/3" }).click();
+    await page.getByRole("link", { name: "7 / 3" }).click();
     await page.getByRole("button", { name: "นำกลับมา" }).click();
-    await expect(page.getByRole("link", { name: "แก้ไขใบนี้" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "แก้ไข", exact: true })).toBeVisible();
   });
 
   test("the list filters by machine and exports", async ({ page }) => {
     await login(page, "store");
-    await page.goto("/issues?machine=PC30&status=active");
-    await expect(page.getByRole("row").filter({ hasText: "7/3" })).toBeVisible();
-    await expect(page.getByRole("row").filter({ hasText: "7/1" })).toHaveCount(0);
+    await page.goto("/issues?machine=PC30");
+    await expect(page.getByRole("row").filter({ hasText: "7 / 3" })).toBeVisible();
+    await expect(page.getByRole("row").filter({ hasText: "7 / 1" })).toHaveCount(0);
     const res = await page.request.get("/issues/export?machine=PC30");
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toContain("spreadsheetml");
