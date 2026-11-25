@@ -40,7 +40,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="flex flex-col gap-1">
           <h1 className="font-display text-[34px] font-semibold leading-snug">ซื้อน้ำมันเข้า</h1>
-          <p className="text-muted">น้ำมันที่เติมเข้ารถเติมน้ำมัน ใบจ่ายคิดเงินตามราคาของบิลซื้อล่าสุดก่อนวันที่จ่าย</p>
+          <p className="text-muted">น้ำมันที่เติมเข้ารถเติมน้ำมัน ใบจ่ายคิดเงินตามราคาของบิลซื้อ น้ำมันที่เข้าก่อนถูกใช้ก่อน</p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <MonthSelect id="pu-month" path="/purchases" month={month} months={months} />
@@ -78,7 +78,10 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                     <tbody>
                       {shown.map((p) => (
                         <tr key={p.id} className={p.cancelled ? "text-muted line-through" : undefined}>
-                          <td className="whitespace-nowrap">{thaiShort(p.date)}</td>
+                          <td className="whitespace-nowrap">
+                            {thaiShort(p.date)}
+                            {p.time && <span className="ml-1.5 text-muted">{p.time} น.</span>}
+                          </td>
                           <td className="n">{formatBaht(p.liters)}</td>
                           <td className="n">{formatBaht(p.pricePerLiter)}</td>
                           <td className="n">{formatBaht(p.amount)}</td>
@@ -134,8 +137,9 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
           </Card>
 
           <p className="text-[14px] text-muted">
-            ไม่มีตารางราคาประจำวันแล้ว ใบจ่ายแต่ละใบใช้ราคาของบิลซื้อล่าสุดที่ลงวันที่ไม่เกินวันที่ของใบ ถ้าวันเดียวกันมีหลายบิล ใช้บิลที่บันทึกหลังสุด ใบจ่ายที่ยังไม่มีบิลก่อนหน้าจะขึ้น “รอราคา” เมื่อแก้ ยกเลิก หรือเพิ่มบิล
-            ใบจ่ายในรอบที่ยังไม่ปิดจะคิดเงินใหม่ตามบิลให้เอง
+            ใบจ่ายใช้น้ำมันของบิลที่เข้าก่อนให้หมดก่อน แล้วจึงใช้บิลถัดไป เรียงตามวันที่และเวลาบนบิล ถ้าไม่มีบิลใหม่ ราคาของบิลเดิมใช้ต่อไปจนน้ำมันของบิลนั้นหมด
+            ใบจ่ายที่คร่อมสองบิลจะแยกเป็นสองราคา เลือกบิลเองไม่ได้ ถ้าลำดับผิดให้แก้ลิตร วันที่ หรือเวลาที่ต้นทาง เมื่อเพิ่ม แก้ หรือยกเลิกบิล
+            ระบบคิดเงินใบจ่ายในรอบที่ยังไม่ปิดใหม่ และบอกก่อนบันทึกว่ามีกี่ใบที่ยอดเงินเปลี่ยน รอบที่ปิดแล้วไม่เปลี่ยน
           </p>
         </div>
 
@@ -147,7 +151,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
             today={today}
             initialDate=""
             initialPrice={null}
-            editing={{ id: editing.id, date: editing.date, liters: editing.liters, price: editing.pricePerLiter, amount: editing.amount, billNo: editing.billNo ?? "", note: editing.note ?? "" }}
+            editing={{ id: editing.id, date: editing.date, time: editing.time, liters: editing.liters, price: editing.pricePerLiter, amount: editing.amount, billNo: editing.billNo ?? "", note: editing.note ?? "" }}
           />
         ) : mode === "purchase" ? (
           <PurchasePanel key={`${mode}-${editDate}`} mode="purchase" month={month} today={today} initialDate={editDate} initialPrice={null} />

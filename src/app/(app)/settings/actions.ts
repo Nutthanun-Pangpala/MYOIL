@@ -51,7 +51,7 @@ export async function saveTankAction(raw: unknown) {
   await requireAdministrator();
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const date = typeof r.openingDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.openingDate) ? r.openingDate : null;
-  const res = await saveTank({ capacity: n(r.capacity), low: n(r.low), opening: n(r.opening) ?? 0, openingDate: date });
+  const res = await saveTank({ capacity: n(r.capacity), low: n(r.low), opening: n(r.opening) ?? 0, openingDate: date, openingPrice: n(r.openingPrice) });
   if (res.ok) {
     revalidatePath("/settings/tank");
     revalidatePath("/", "layout");

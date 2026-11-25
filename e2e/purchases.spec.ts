@@ -39,27 +39,43 @@ test("a purchase appears in the list with its totals", async ({ page }) => {
   await expect(row).toContainText("40,000.00");
   await expect(page.getByRole("row").filter({ hasText: "รวม 1 ครั้ง" })).toContainText("40,000.00");
 
-  // no daily price list any more (owner, 25 Nov 2026): the page says how slips are priced instead
-  await expect(page.getByText("ไม่มีตารางราคาประจำวันแล้ว")).toBeVisible();
+  // no daily price list (owner, 25 Nov 2026): the page says how slips are priced instead, and the bill shows its time
+  await expect(page.getByText("ใบจ่ายใช้น้ำมันของบิลที่เข้าก่อนให้หมดก่อน")).toBeVisible();
+  await expect(row).toContainText(/\d\d:\d\d น\./);
   await expect(page.getByRole("link", { name: "ตั้งราคาของวันที่ไม่มีการซื้อ" })).toHaveCount(0);
 });
 
-test("two bills on one day: slips use the bill recorded last; cancelling it falls back to the first", async ({ page }) => {
+test("oldest fuel first: a slip that crosses two bills is split into two prices; cancelling the second bill asks first", async ({ page }) => {
   await login(page, "store");
+  // B-001 (1,000 liters at 40.00) is the only fuel: a small slip takes all its liters from it
   await keyIssue(page, { book: "3", doc: "1", date: "2026-01-20", machine: "BILL-A", liters: "10" });
-  await expect(page.getByText("ตามบิลซื้อวันที่ 15/01/69 เลขที่ B-001")).toBeVisible(); // 40.00 from the first bill
+  await expect(page.getByTestId("price-parts")).toContainText("× 40.00 = 400.00 บาท");
+  await expect(page.getByTestId("price-parts")).toContainText("เลขที่ B-001");
 
-  await recordPurchase(page, { date: DAY, liters: "500", price: "41", billNo: "B-002" }); // reprices the open slip, says so, "รับทราบ"
+  // a second bill does not touch the slip already priced: the first bill still has liters left (no question, no note)
+  await recordPurchase(page, { date: DAY, liters: "500", price: "41", billNo: "B-002" });
   await expect(page.getByRole("row").filter({ hasText: "รวม 2 ครั้ง" })).toBeVisible();
   await page.goto("/issues");
-  await expect(page.getByRole("row").filter({ hasText: "BILL-A" })).toContainText("410.00");
+  await expect(page.getByRole("row").filter({ hasText: "BILL-A" })).toContainText("400.00");
 
+  // 1,000 liters: the 990 left of B-001 at 40.00, then 10 from B-002 at 41.00 (brief §14 B3)
+  await keyIssue(page, { book: "3", doc: "2", date: "2026-01-20", machine: "BILL-B", liters: "1000" });
+  await expect(page.getByTestId("price-parts")).toContainText("× 40.00 = 39,600.00 บาท");
+  await expect(page.getByTestId("price-parts")).toContainText("× 41.00 = 410.00 บาท");
+  await page.goto("/issues");
+  await expect(page.getByRole("row").filter({ hasText: "BILL-B" })).toContainText("40,010.00");
+
+  // B5: cancelling B-002 would change that slip, so it is said first; after "ยืนยันทำต่อ" its last 10 liters wait for a price (B7)
   await page.goto(`/purchases?month=${MONTH}`);
-  await page.getByRole("row").filter({ hasText: "B-002" }).getByRole("button", { name: "ยกเลิก", exact: true }).click();
+  const bill = page.getByRole("row").filter({ hasText: "B-002" });
+  await bill.getByRole("button", { name: "ยกเลิก", exact: true }).click();
   await page.getByLabel("เหตุผลที่ยกเลิกรายการซื้อ").fill("e2e ยกเลิกบิลที่สอง");
   await page.getByRole("button", { name: "ยืนยันยกเลิก" }).click();
+  await expect(page.getByText("ใบจ่าย 1 ใบในรอบที่ยังไม่ปิดจะเปลี่ยนยอดเงิน")).toBeVisible();
+  await page.getByRole("button", { name: "ยืนยันทำต่อ" }).click();
   await expect(page.getByText("ยกเลิกแล้ว: e2e ยกเลิกบิลที่สอง")).toBeVisible();
   await page.goto("/issues");
+  await expect(page.getByRole("row").filter({ hasText: "BILL-B" })).toContainText("รอราคา");
   await expect(page.getByRole("row").filter({ hasText: "BILL-A" })).toContainText("400.00");
 });
 

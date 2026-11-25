@@ -41,20 +41,28 @@ export function IssueActions({
 
   function open(d: "sign" | "cancel") {
     setMsg(null);
+    setSure(false);
     setDialog(d);
   }
 
-  function run(fn: () => Promise<{ ok: boolean; message?: string }>, text: string) {
+  /** B5: the server said other slips would get another amount; the next press of the same button says yes */
+  const [sure, setSure] = useState(false);
+
+  function run(fn: (confirmed: boolean) => Promise<{ ok: boolean; message?: string; confirm?: string[] }>, text: string) {
     setMsg(null);
     start(async () => {
       try {
-        const r = await fn();
+        const r = await fn(sure);
+        setSure(false);
         if (r.ok) {
           setDialog(null);
           setName("");
           setReason("");
           setDone((d) => ({ text, n: (d?.n ?? 0) + 1 }));
           router.refresh();
+        } else if (r.confirm?.length) {
+          setSure(true);
+          setMsg(`${r.confirm.join(" ")} ถ้าต้องการทำต่อ กดปุ่มเดิมอีกครั้ง`);
         } else setMsg(r.message ?? "ทำไม่สำเร็จ");
       } catch {
         setMsg("ทำไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองอีกครั้ง ข้อมูลที่พิมพ์ยังอยู่");
@@ -72,7 +80,7 @@ export function IssueActions({
     <>
       {done && <Toast key={done.n}>{done.text}</Toast>}
       {cancelled ? (
-        <Button disabled={busy} onClick={() => run(() => restoreIssueAction(id), "นำกลับมาแล้ว")}>
+        <Button disabled={busy} onClick={() => run((c) => restoreIssueAction(id, c), "นำกลับมาแล้ว")}>
           นำกลับมา
         </Button>
       ) : (
@@ -116,7 +124,7 @@ export function IssueActions({
         {error}
         <div className="flex flex-wrap justify-end gap-3 pt-1">
           <Button onClick={() => setDialog(null)}>ไม่ยกเลิก กลับไปที่ใบ</Button>
-          <Button variant="danger" disabled={busy} onClick={() => run(() => cancelIssueAction(id, reason), "ยกเลิกใบแล้ว")}>
+          <Button variant="danger" disabled={busy} onClick={() => run((c) => cancelIssueAction(id, reason, c), "ยกเลิกใบแล้ว")}>
             ยกเลิกใบนี้
           </Button>
         </div>

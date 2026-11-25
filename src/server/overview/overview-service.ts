@@ -2,12 +2,11 @@ import { and, eq, gte, inArray, isNull, lte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { monthUpTo } from "@/domain/iso-date";
 import { projectBreakdown, tankLevel } from "@/domain/overview";
-import { priceOn } from "@/domain/price";
 import { sumLiters } from "@/domain/money";
 import { canOpen } from "@/lib/nav";
 import type { Session } from "@/lib/session";
 import { ledgerMonths, loadLedgerMonth, stockOn } from "@/server/ledger/ledger-service";
-import { loadBills } from "@/server/prices/price-queries";
+import { stockByBill } from "@/server/prices/fifo-service";
 import { visibleProjectIds } from "@/server/projects/project-scope";
 import { billableSql } from "@/server/issues/billable";
 import { cycleLabel, listCycles } from "@/server/cycles/cycle-service";
@@ -40,19 +39,20 @@ export async function loadOverview(session: Session, month: string, today: strin
   const breakdown = projectBreakdown(lines);
   const todaySlips = new Set(lines.filter((l) => l.date === today).map((l) => l.issueId)).size;
 
-  const [prices, months, [cfg], activeProjects] = await Promise.all([
-    loadBills(),
+  const [months, [cfg], activeProjects] = await Promise.all([
     ledgerMonths(today),
     db.select().from(schema.appSettings).where(eq(schema.appSettings.id, 1)),
     db.select({ id: schema.projects.id }).from(schema.projects).where(and(eq(schema.projects.isActive, true), ids ? inArray(schema.projects.id, ids) : undefined)),
   ]);
-  const price = priceOn(prices, today);
 
   // stock and the ledger-based to-do items: only for roles that may open the ledger
   let tank: (ReturnType<typeof tankLevel> & { liters: number; capacity: number | null; inToday: number; outToday: number }) | null = null;
   let negative: { days: number; first: string; closing: number } | null = null;
+  /** fuel still in the truck at the prices of the bills it came from (brief §14 B8) */
+  let stockValue: { liters: number; amount: number } | null = null;
   if (canOpen(session.role, "/ledger")) {
-    const [s, cur] = await Promise.all([stockOn(today), loadLedgerMonth(today.slice(0, 7), today)]);
+    const [s, cur, left] = await Promise.all([stockOn(today), loadLedgerMonth(today.slice(0, 7), today), stockByBill()]);
+    stockValue = { liters: left.liters, amount: left.amount };
     const row = cur.rows.find((r) => r.date === today);
     tank = {
       ...tankLevel(s.liters, cfg?.tankCapacityLiters ?? null, cfg?.lowLevelLiters ?? null),
@@ -96,7 +96,7 @@ export async function loadOverview(session: Session, month: string, today: strin
     months: months.includes(month) ? months : [month, ...months],
     breakdown,
     todaySlips,
-    price,
+    stockValue,
     idleProjects: Math.max(0, activeProjects.length - breakdown.rows.length),
     tank,
     negative,

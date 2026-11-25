@@ -24,7 +24,7 @@ describe("validateCycleDates", () => {
 
 describe("validateTank", () => {
   it("accepts sensible numbers", () => {
-    expect(validateTank({ capacity: 6000, low: 1200, opening: 380, openingDate: "2026-11-01" })).toEqual({});
+    expect(validateTank({ capacity: 6000, low: 1200, opening: 380, openingDate: "2026-11-01", openingPrice: 32.5 })).toEqual({});
   });
   it("low mark cannot exceed capacity", () => {
     expect(validateTank({ capacity: 1000, low: 2000, opening: 0, openingDate: null }).low).toBeDefined();
@@ -32,6 +32,12 @@ describe("validateTank", () => {
   it("capacity must be above zero when given; empty is allowed (not known yet)", () => {
     expect(validateTank({ capacity: 0, low: null, opening: 0, openingDate: null }).capacity).toBeDefined();
     expect(validateTank({ capacity: null, low: null, opening: 0, openingDate: null })).toEqual({});
+  });
+  it("fuel already in the truck needs its price per liter (brief §14 B8); none needed when the truck starts empty", () => {
+    expect(validateTank({ capacity: null, low: null, opening: 380, openingDate: null }).openingPrice).toBeDefined();
+    expect(validateTank({ capacity: null, low: null, opening: 380, openingDate: null, openingPrice: 0 }).openingPrice).toBeDefined();
+    expect(validateTank({ capacity: null, low: null, opening: 380, openingDate: null, openingPrice: 32.555 }).openingPrice).toBeDefined();
+    expect(validateTank({ capacity: null, low: null, opening: 0, openingDate: null, openingPrice: null })).toEqual({});
   });
   it("opening balance is not negative and has at most 2 decimals", () => {
     expect(validateTank({ capacity: null, low: null, opening: -1, openingDate: null }).opening).toBeDefined();

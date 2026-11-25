@@ -6,6 +6,7 @@ import { thaiMonthShort } from "@/domain/thai-date";
 import type { Session } from "@/lib/session";
 import { visibleProjectIds } from "../projects/project-scope";
 import { billableSql } from "../issues/billable";
+import { partsOfLines, repriceOpenLines } from "../prices/fifo-service";
 
 const { claimCycles, cycleEvents, fuelIssues, fuelIssueLines, invoices, machines, projects, users } = schema;
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -125,7 +126,7 @@ async function slipsOfCycle(session: Session, cycleId: string, onlyProject?: str
     .orderBy(asc(fuelIssues.issueDate), asc(fuelIssues.bookNo), asc(fuelIssues.docNo));
   if (heads.length === 0) return [];
   const lines = await db
-    .select({ issueId: fuelIssueLines.issueId, machine: machines.code, liters: fuelIssueLines.liters, price: fuelIssueLines.pricePerLiter, amount: fuelIssueLines.amount })
+    .select({ id: fuelIssueLines.id, issueId: fuelIssueLines.issueId, machine: machines.code, liters: fuelIssueLines.liters, price: fuelIssueLines.pricePerLiter, amount: fuelIssueLines.amount })
     .from(fuelIssueLines)
     .innerJoin(machines, eq(fuelIssueLines.machineId, machines.id))
     .where(inArray(fuelIssueLines.issueId, heads.map((h) => h.id)))
@@ -211,7 +212,8 @@ export async function loadCycleView(session: Session, cycleId: string): Promise<
 
 // ───────────── one project's invoice ─────────────
 
-export type InvoiceLine = { slipId: string; date: string; bookNo: string; docNo: string; machines: string; price: number | null; liters: number; amount: number | null };
+/** one row of the invoice. A slip whose liters came from two bills is two rows, one per price (brief §14 B10); `part` tells them apart */
+export type InvoiceLine = { slipId: string; part: number; date: string; bookNo: string; docNo: string; machines: string; price: number | null; liters: number; amount: number | null };
 export type InvoiceDetail = {
   cycle: CycleRow;
   /** code = accounting code (projects.project_code), printed after the ref on the form */
@@ -234,20 +236,26 @@ export async function loadInvoice(session: Session, cycleId: string, projectId: 
   if (!p) return null;
   const slips = await slipsOfCycle(session, cycleId, projectId);
   const signed = slips.filter((s) => s.signed);
-  const lines: InvoiceLine[] = signed.map((s) => {
-    const priced = s.lines.filter((l) => l.price !== null);
-    const liters = sumLiters(s.lines.map((l) => l.liters));
-    const complete = priced.length === s.lines.length;
-    return {
-      slipId: s.id,
-      date: s.issueDate,
-      bookNo: s.bookNo,
-      docNo: s.docNo,
-      machines: s.lines.map((l) => l.machine).join("+"),
-      price: priced[0]?.price ?? null,
-      liters,
-      amount: complete ? sumAmounts(s.lines.map((l) => l.amount ?? 0)) : null,
-    };
+  const cut = await partsOfLines(signed.flatMap((s) => s.lines.map((l) => l.id)));
+  const lines: InvoiceLine[] = signed.flatMap((s) => {
+    const head = { slipId: s.id, date: s.issueDate, bookNo: s.bookNo, docNo: s.docNo, machines: s.lines.map((l) => l.machine).join("+") };
+    // liters of the slip by price, in the order the fuel was used; a line never cut into bills counts at its own price
+    const byPrice = new Map<number | null, { liters: number[]; amounts: (number | null)[] }>();
+    for (const l of s.lines) {
+      const parts = cut.get(l.id);
+      for (const p of parts?.length ? parts : [{ price: l.amount === null ? null : l.price, liters: l.liters, amount: l.amount }]) {
+        const g = byPrice.get(p.price) ?? byPrice.set(p.price, { liters: [], amounts: [] }).get(p.price)!;
+        g.liters.push(p.liters);
+        g.amounts.push(p.amount);
+      }
+    }
+    return [...byPrice].map(([price, g], part) => ({
+      ...head,
+      part,
+      price,
+      liters: sumLiters(g.liters),
+      amount: g.amounts.some((a) => a === null) ? null : sumAmounts(g.amounts.map((a) => a!)),
+    }));
   });
   const [inv] = await db.select().from(invoices).where(and(eq(invoices.cycleId, cycleId), eq(invoices.projectId, projectId))).limit(1);
   const unsigned = slips.filter((s) => !s.signed);
@@ -285,7 +293,7 @@ export async function closeCycle(session: Session, cycleId: string): Promise<Cyc
     const signedIds = new Set(heads.filter((h) => h.signed && !h.cancelled).map((h) => h.id));
     const unpriced = new Set(lines.filter((l) => signedIds.has(l.issueId) && l.amount === null).map((l) => l.issueId));
     if (unpriced.size > 0) {
-      return { ok: false as const, message: `ปิดรอบไม่ได้ มีใบที่เซ็นรับแล้วแต่ยังไม่มีราคา ${unpriced.size} ใบ บันทึกบิลซื้อที่ลงวันที่ไม่เกินวันที่ในใบก่อน แล้วค่อยปิดรอบ` };
+      return { ok: false as const, message: `ปิดรอบไม่ได้ มีใบที่เซ็นรับแล้วแต่ยังรอราคา ${unpriced.size} ใบ บันทึกบิลซื้อที่ขาด หรือยืนยันบิลที่ส่งจากมือถือก่อน แล้วค่อยปิดรอบ` };
     }
     const litersOf = (id: string) => sumLiters(lines.filter((l) => l.issueId === id).map((l) => l.liters));
     const plan = planClose(heads.map((h) => ({ id: h.id, signed: h.signed, cancelled: h.cancelled !== null, liters: litersOf(h.id) })));
@@ -323,6 +331,7 @@ export async function reopenCycle(session: Session, cycleId: string, reason: str
     // every invoice of the cycle goes back to draft: it has to be issued and signed again
     await tx.update(invoices).set({ status: "draft", statusChangedAt: new Date() }).where(eq(invoices.cycleId, cycleId));
     await tx.insert(cycleEvents).values({ cycleId, action: "reopen", reason: reason.trim().slice(0, 300), userId: session.userId });
+    await repriceOpenLines(tx); // open again = its slips follow the bills again (brief §14 B5)
     return { ok: true as const };
   });
 }

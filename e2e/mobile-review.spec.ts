@@ -87,7 +87,7 @@ test("editing a checked phone slip keeps its meter photo and marks it 'แก้
   await expect(page.getByAltText("รูปมิเตอร์ บรรทัด 1")).toBeVisible();
 });
 
-test("a purchase from the phone is a price at once and still waits for ยืนยัน", async ({ page, request }) => {
+test("a purchase from the phone waits for ยืนยัน (its price is used only after that, brief §14 B6)", async ({ page, request }) => {
   const res = await request.post("/api/bookcare/v1/purchases", {
     headers: { Authorization: `Bearer ${TEST_PUSH_KEY}` },
     data: { ref: randomUUID(), purchaseDate: today, recordedAt: null, driver: { bookcareUserId: "bc-1", name: "สมชาย" }, liters: "2000", amount: "64980.00", billNo: "INV-E2E", billPhoto: jpeg("bill") },

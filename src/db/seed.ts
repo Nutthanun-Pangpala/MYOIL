@@ -62,7 +62,7 @@ async function main() {
   // one purchase bill today (Bangkok): 5,000 liters at 32.50, so the truck has fuel and a slip keyed today shows an amount
   // (a slip takes its price from the latest bill on or before its date; key one for an earlier date to see "รอราคา")
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
-  await db.insert(schema.fuelPurchases).values({ purchaseDate: today, liters: 5000, pricePerLiter: 32.5, amount: 162500, billNo: "DEMO-0001", note: "ข้อมูลตัวอย่าง" });
+  await db.insert(schema.fuelPurchases).values({ purchaseDate: today, purchaseTime: "00:01", liters: 5000, pricePerLiter: 32.5, amount: 162500, billNo: "DEMO-0001", note: "ข้อมูลตัวอย่าง" });
 
   await db
     .insert(schema.appSettings)

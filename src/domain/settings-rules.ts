@@ -18,9 +18,9 @@ export function validateCycleDates(a: {
   return null;
 }
 
-export type TankErrors = { capacity?: string; low?: string; opening?: string };
+export type TankErrors = { capacity?: string; low?: string; opening?: string; openingPrice?: string };
 
-export function validateTank(t: { capacity: number | null; low: number | null; opening: number; openingDate: string | null }): TankErrors {
+export function validateTank(t: { capacity: number | null; low: number | null; opening: number; openingDate: string | null; openingPrice?: number | null }): TankErrors {
   const e: TankErrors = {};
   if (t.capacity !== null) {
     if (!(t.capacity > 0)) e.capacity = "ความจุต้องมากกว่า 0 ลิตร";
@@ -33,6 +33,12 @@ export function validateTank(t: { capacity: number | null; low: number | null; o
   }
   if (!Number.isFinite(t.opening) || t.opening < 0) e.opening = "ใส่ยอดยกมาตั้งแต่ 0 ลิตรขึ้นไป";
   else if (!hasAtMostTwoDecimals(t.opening)) e.opening = TWO_DECIMALS_MESSAGE;
+  // brief §14 B8: fuel already in the truck is used up before the first bill, so it needs a price of its own
+  const price = t.openingPrice ?? null;
+  if (price === null) {
+    if (t.opening > 0) e.openingPrice = "ใส่ราคาต่อลิตรของยอดยกมา (น้ำมันส่วนนี้ถูกใช้ก่อนบิลแรก)";
+  } else if (!(price > 0)) e.openingPrice = "ราคาต้องมากกว่า 0 บาท";
+  else if (!hasAtMostTwoDecimals(price)) e.openingPrice = TWO_DECIMALS_MESSAGE;
   return e;
 }
 

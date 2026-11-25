@@ -3,11 +3,12 @@ import { db, schema } from "@/db";
 import { checkIssue, machineKey, type IssueCheck, type IssueContext, type IssueInput } from "@/domain/issue-check";
 import { cancelReasonError, changeLock } from "@/domain/issue-actions";
 import { receiverNameError } from "@/domain/rules";
-import { lineAmount, sumAmounts, sumLiters } from "@/domain/money";
+import { sumAmounts, sumLiters } from "@/domain/money";
 import { thaiMonthShort, thaiShort } from "@/domain/thai-date";
 import type { Session } from "@/lib/session";
 import { cycleIdFor } from "../cycles/cycle-service";
-import { billForDate, priceForDate } from "../prices/price-queries";
+import { Ask, partsOfLines, previewSlip, repriceOrAsk } from "../prices/fifo-service";
+import type { Part } from "@/domain/fifo";
 import { visibleProjectIds } from "../projects/project-scope";
 import { checkSlipPhoto, type SlipPhotoInput } from "./slip-photo";
 
@@ -90,13 +91,18 @@ export async function loadIssueContext(input: IssueInput, excludeId?: string): P
 export async function previewIssue(input: IssueInput, excludeId?: string) {
   const ctx = await loadIssueContext(input, excludeId);
   const check = checkIssue(input, ctx);
-  const price = input.issueDate ? await priceForDate(input.issueDate) : null;
-  return { check, price, duplicateIssueId: ctx.duplicateIssueId };
+  // what these liters would cost, oldest fuel first (brief §14): one price, or split over two bills
+  const liters = input.lines.map((l) => l.liters).filter((n): n is number => n !== null && n > 0);
+  const cost = input.issueDate && liters.length > 0 ? await previewSlip({ date: input.issueDate, time: input.timeIn || null, liters, excludeIssueId: excludeId }) : null;
+  const split = new Map<number | null, number>();
+  for (const p of cost?.parts ?? []) split.set(p.price, Math.round(((split.get(p.price) ?? 0) + p.liters) * 100) / 100);
+  return { check, price: cost?.price ?? null, amount: cost?.amount ?? null, split: [...split].map(([price, l]) => ({ price, liters: l })), duplicateIssueId: ctx.duplicateIssueId };
 }
 
 // ───────────── save ─────────────
 
-export type SaveResult = { ok: true; id: string } | { ok: false; check: IssueCheck };
+/** `confirm` = other slips would get another amount (B5): ask, then send again with confirmed */
+export type SaveResult = { ok: true; id: string } | { ok: false; check: IssueCheck; confirm?: string[] };
 
 function isUniqueViolation(e: unknown): boolean {
   const err = e as { code?: string; cause?: { code?: string } };
@@ -117,13 +123,9 @@ async function resolveMachines(tx: Tx, codes: string[]): Promise<Map<string, str
   return out;
 }
 
-export async function createIssue(session: Session, input: IssueInput): Promise<SaveResult> {
+export async function createIssue(session: Session, input: IssueInput, confirmed = false): Promise<SaveResult> {
   const check = checkIssue(input, await loadIssueContext(input));
   if (!check.ok) return { ok: false, check };
-
-  // the bill this slip draws on (latest purchase on or before its date); none → "รอราคา": liters saved, money left empty
-  const bill = await billForDate(input.issueDate);
-  const price = bill?.pricePerLiter ?? null;
 
   try {
     const id = await db.transaction(async (tx) => {
@@ -146,7 +148,6 @@ export async function createIssue(session: Session, input: IssueInput): Promise<
           receivedSigned: input.receivedSigned,
           receiverName: input.receivedSigned ? input.receiverName.trim() : input.receiverName.trim() || null,
           recordedBy: session.userId,
-          pricePurchaseId: bill?.id ?? null,
         })
         .returning({ id: fuelIssues.id });
 
@@ -157,16 +158,19 @@ export async function createIssue(session: Session, input: IssueInput): Promise<
           machineId: machineIds.get(machineKey(l.machine))!,
           hourMeter: l.hourMeter,
           liters: l.liters!,
-          pricePerLiter: price,
-          amount: price === null ? null : lineAmount(l.liters!, price),
+          pricePerLiter: null,
+          amount: null,
         })),
       );
 
       await tx.insert(fuelIssueAudit).values({ issueId: issue.id, userId: session.userId, action: "create", changes: null });
+      // the money: oldest fuel first (brief §14). A slip keyed with an earlier date moves the slips after it (B5)
+      await repriceOrAsk(tx, confirmed, { except: issue.id });
       return issue.id;
     });
     return { ok: true, id };
   } catch (e) {
+    if (e instanceof Ask) return { ok: false, check, confirm: e.notes };
     if (isUniqueViolation(e)) {
       // two people keyed the same book+doc at once: the database index is the last line of defence
       const again = checkIssue(input, { ...(await loadIssueContext(input)), duplicateIssueId: "race" });
@@ -308,10 +312,10 @@ export async function listIssues(session: Session, f: IssueFilters): Promise<Iss
 
 export type IssueDetail = {
   head: typeof fuelIssues.$inferSelect & { projectRef: string; projectName: string; recordedByName: string };
-  lines: { position: number; machine: string; hourMeter: number | null; liters: number; pricePerLiter: number | null; amount: number | null }[];
+  lines: { id: string; position: number; machine: string; hourMeter: number | null; liters: number; pricePerLiter: number | null; amount: number | null }[];
   audit: { action: string; at: Date; userName: string | null; changes: unknown }[];
-  /** the purchase bill the price comes from (null = รอราคา, or a slip priced before bills were linked) */
-  bill: { date: string; billNo: string | null; pricePerLiter: number } | null;
+  /** where the liters came from, oldest fuel first: one row per bill and price (brief §14). `bill` null = opening stock or nothing yet */
+  parts: { position: number; kind: Part["kind"]; liters: number; price: number | null; amount: number | null; bill: { date: string; time: string | null; billNo: string | null; pending: boolean } | null }[];
   /** label like "ก.ย. 2569" when the slip belongs to a closed cycle */
   closedCycleLabel: string | null;
   /** when the photo of the signed paper was attached (ms), null = none; used to refresh the browser's cached picture */
@@ -334,6 +338,7 @@ export async function getIssue(session: Session, id: string): Promise<IssueDetai
 
   const lines = await db
     .select({
+      id: fuelIssueLines.id,
       position: fuelIssueLines.position,
       machine: machines.code,
       hourMeter: fuelIssueLines.hourMeter,
@@ -359,17 +364,24 @@ export async function getIssue(session: Session, id: string): Promise<IssueDetai
     .where(eq(schema.issueSignedPhotos.issueId, id))
     .limit(1);
 
-  const [bill] = row.issue.pricePurchaseId
+  const cut = await partsOfLines(lines.map((l) => l.id));
+  const billIds = [...new Set([...cut.values()].flat().map((p) => p.lotId).filter((v): v is string => v !== null))];
+  const bills = billIds.length
     ? await db
-        .select({ date: schema.fuelPurchases.purchaseDate, billNo: schema.fuelPurchases.billNo, pricePerLiter: schema.fuelPurchases.pricePerLiter })
+        .select({ id: schema.fuelPurchases.id, date: schema.fuelPurchases.purchaseDate, time: schema.fuelPurchases.purchaseTime, billNo: schema.fuelPurchases.billNo, status: schema.fuelPurchases.status })
         .from(schema.fuelPurchases)
-        .where(eq(schema.fuelPurchases.id, row.issue.pricePurchaseId))
-        .limit(1)
+        .where(inArray(schema.fuelPurchases.id, billIds))
     : [];
+  const parts = lines.flatMap((l) =>
+    (cut.get(l.id) ?? []).map((p) => {
+      const b = bills.find((x) => x.id === p.lotId);
+      return { position: l.position, kind: p.kind, liters: p.liters, price: p.price, amount: p.amount, bill: b ? { date: b.date, time: b.time, billNo: b.billNo, pending: b.status === "pending_confirm" } : null };
+    }),
+  );
 
   return {
     head: { ...row.issue, projectRef: row.projectRef, projectName: row.projectName, recordedByName: row.recordedByName },
-    bill: bill ?? null,
+    parts,
     lines,
     audit,
     closedCycleLabel: row.cycleStatus === "closed" ? thaiMonthShort(row.cycleStart!) : null,
@@ -416,7 +428,20 @@ export async function lastIssueNumbers(session: Session): Promise<{ bookNo: stri
 
 // ───────────── change a saved slip: edit · sign · cancel · restore ─────────────
 
-export type ChangeResult = { ok: true } | { ok: false; message: string; check?: IssueCheck };
+/** `confirm` = other slips would get another amount (B5): ask, then send again with confirmed */
+export type ChangeResult = { ok: true } | { ok: false; message: string; check?: IssueCheck; confirm?: string[] };
+
+const ASK = "ตรวจก่อนบันทึก";
+/** runs a change; when it stopped itself to ask (B5) the answer carries the question */
+async function orAsk(run: () => Promise<void>): Promise<ChangeResult> {
+  try {
+    await run();
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof Ask) return { ok: false, message: ASK, confirm: e.notes };
+    throw e;
+  }
+}
 
 type Head = typeof fuelIssues.$inferSelect;
 
@@ -459,21 +484,23 @@ export async function markIssueSigned(session: Session, id: string, receiverName
   return { ok: true };
 }
 
-export async function cancelIssue(session: Session, id: string, reason: string): Promise<ChangeResult> {
+export async function cancelIssue(session: Session, id: string, reason: string, confirmed = false): Promise<ChangeResult> {
   const cur = await loadForChange(session, id);
   if (!cur) return NOT_FOUND;
   if (cur.lock) return { ok: false, message: cur.lock };
   const err = cancelReasonError(reason);
   if (err) return { ok: false, message: err };
   const why = reason.trim().slice(0, 300);
-  await db.transaction(async (tx) => {
-    await tx.update(fuelIssues).set({ cancelledAt: new Date(), cancelReason: why, updatedAt: new Date() }).where(eq(fuelIssues.id, id));
-    await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "cancel", changes: { reason: [null, why] } });
-  });
-  return { ok: true };
+  return orAsk(() =>
+    db.transaction(async (tx) => {
+      await tx.update(fuelIssues).set({ cancelledAt: new Date(), cancelReason: why, updatedAt: new Date() }).where(eq(fuelIssues.id, id));
+      await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "cancel", changes: { reason: [null, why] } });
+      await repriceOrAsk(tx, confirmed, { except: id }); // its liters go back to their bills: the slips after it draw on older fuel
+    }),
+  );
 }
 
-export async function restoreIssue(session: Session, id: string): Promise<ChangeResult> {
+export async function restoreIssue(session: Session, id: string, confirmed = false): Promise<ChangeResult> {
   const [row] = await db
     .select({ head: fuelIssues, cycleStatus: claimCycles.status, cycleStart: claimCycles.startDate })
     .from(fuelIssues)
@@ -494,11 +521,13 @@ export async function restoreIssue(session: Session, id: string): Promise<Change
     .where(and(eq(fuelIssues.bookNo, row.head.bookNo), eq(fuelIssues.docNo, row.head.docNo), ne(fuelIssues.id, id), isNull(fuelIssues.cancelledAt)))
     .limit(1);
   if (dup) return { ok: false, message: "เล่มที่และเลขที่นี้มีใบอื่นใช้อยู่แล้ว นำกลับมาไม่ได้" };
-  await db.transaction(async (tx) => {
-    await tx.update(fuelIssues).set({ cancelledAt: null, cancelReason: null, updatedAt: new Date() }).where(eq(fuelIssues.id, id));
-    await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "restore", changes: null });
-  });
-  return { ok: true };
+  return orAsk(() =>
+    db.transaction(async (tx) => {
+      await tx.update(fuelIssues).set({ cancelledAt: null, cancelReason: null, updatedAt: new Date() }).where(eq(fuelIssues.id, id));
+      await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "restore", changes: null });
+      await repriceOrAsk(tx, confirmed, { except: id });
+    }),
+  );
 }
 
 /** a slip as the form holds it, for editing */
@@ -529,15 +558,13 @@ export async function getIssueForEdit(session: Session, id: string) {
 }
 
 /** `reason`: why the office changed it (the phone-slip check asks for one); kept in the slip's history */
-export async function updateIssue(session: Session, id: string, input: IssueInput, reason?: string): Promise<ChangeResult> {
+export async function updateIssue(session: Session, id: string, input: IssueInput, reason?: string, confirmed = false): Promise<ChangeResult> {
   const cur = await loadForChange(session, id);
   if (!cur) return NOT_FOUND;
   if (cur.lock) return { ok: false, message: cur.lock };
   const check = checkIssue(input, await loadIssueContext(input, id));
   if (!check.ok) return { ok: false, message: "ตรวจช่องที่ขึ้นสีแดงก่อน", check };
 
-  const bill = await billForDate(input.issueDate);
-  const price = bill?.pricePerLiter ?? null;
   const before = cur.head;
   const changes: Record<string, [unknown, unknown]> = {};
   const note = (k: string, a: unknown, b: unknown) => a !== b && (changes[k] = [a, b]);
@@ -569,7 +596,6 @@ export async function updateIssue(session: Session, id: string, input: IssueInpu
       await tx
         .update(fuelIssues)
         .set({
-          pricePurchaseId: bill?.id ?? null,
           bookNo: input.bookNo.trim(),
           docNo: input.docNo.trim(),
           issueDate: input.issueDate,
@@ -602,8 +628,8 @@ export async function updateIssue(session: Session, id: string, input: IssueInpu
             machineId: machineIds.get(machineKey(l.machine))!,
             hourMeter: l.hourMeter,
             liters: l.liters!,
-            pricePerLiter: price,
-            amount: price === null ? null : lineAmount(l.liters!, price),
+            pricePerLiter: null,
+            amount: null,
           })),
         )
         .returning({ id: fuelIssueLines.id, position: fuelIssueLines.position });
@@ -617,9 +643,12 @@ export async function updateIssue(session: Session, id: string, input: IssueInpu
       }
       if (reason?.trim()) changes.reason = ["-", reason.trim()];
       await tx.insert(fuelIssueAudit).values({ issueId: id, userId: session.userId, action: "update", changes });
+      // changed liters, date or time move this slip in the queue: it and the slips after it are cut into bills again (B5)
+      await repriceOrAsk(tx, confirmed, { except: id });
     });
     return { ok: true };
   } catch (e) {
+    if (e instanceof Ask) return { ok: false, message: ASK, confirm: e.notes };
     if (isUniqueViolation(e)) {
       const again = checkIssue(input, { ...(await loadIssueContext(input, id)), duplicateIssueId: "race" });
       return { ok: false, message: "เล่มที่และเลขที่นี้มีใบอื่นใช้อยู่แล้ว", check: again };

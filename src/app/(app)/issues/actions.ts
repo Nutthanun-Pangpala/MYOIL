@@ -13,9 +13,9 @@ export async function previewIssueAction(raw: unknown, editId?: string) {
 }
 
 /** the signed-slip photo (optional) travels with the new slip; if only the photo fails the slip is still saved */
-export async function saveIssueAction(raw: unknown, photo?: unknown) {
+export async function saveIssueAction(raw: unknown, photo?: unknown, confirmed = false) {
   const session = await requireWriter();
-  const res = await createIssue(session, parseIssueInput(raw));
+  const res = await createIssue(session, parseIssueInput(raw), confirmed === true);
   if (!res.ok || photo == null) return { ...res, photoError: null as string | null };
   const p = await saveSignedPhoto(session, res.id, parseSlipPhoto(photo));
   return { ...res, photoError: p.ok ? null : p.message };
@@ -39,14 +39,16 @@ export async function removeSignedPhotoAction(id: string) {
 
 const isId = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
 const done = (id: string) => {
+  // a changed slip can move the money of the slips after it (oldest fuel first), so every money page is stale
+  revalidatePath("/issues", "layout");
   revalidatePath(`/issues/${id}`);
-  revalidatePath("/issues");
+  for (const p of ["/ledger", "/monthly", "/invoices", "/"]) revalidatePath(p);
 };
 
-export async function updateIssueAction(id: string, raw: unknown) {
+export async function updateIssueAction(id: string, raw: unknown, confirmed = false) {
   const session = await requireWriter();
   if (!isId(id)) return { ok: false as const, message: "ไม่พบใบนี้" };
-  const r = await updateIssue(session, id, parseIssueInput(raw));
+  const r = await updateIssue(session, id, parseIssueInput(raw), undefined, confirmed === true);
   if (r.ok) done(id);
   return r;
 }
@@ -59,18 +61,18 @@ export async function signIssueAction(id: string, receiverName: string) {
   return r;
 }
 
-export async function cancelIssueAction(id: string, reason: string) {
+export async function cancelIssueAction(id: string, reason: string, confirmed = false) {
   const session = await requireWriter();
   if (!isId(id)) return { ok: false as const, message: "ไม่พบใบนี้" };
-  const r = await cancelIssue(session, id, typeof reason === "string" ? reason : "");
+  const r = await cancelIssue(session, id, typeof reason === "string" ? reason : "", confirmed === true);
   if (r.ok) done(id);
   return r;
 }
 
-export async function restoreIssueAction(id: string) {
+export async function restoreIssueAction(id: string, confirmed = false) {
   const session = await requireWriter();
   if (!isId(id)) return { ok: false as const, message: "ไม่พบใบนี้" };
-  const r = await restoreIssue(session, id);
+  const r = await restoreIssue(session, id, confirmed === true);
   if (r.ok) done(id);
   return r;
 }

@@ -103,6 +103,8 @@ export const fuelPurchases = pgTable(
     liters: liters("liters").notNull(),
     pricePerLiter: numeric("price_per_liter", { precision: 8, scale: 2, mode: "number" }).notNull(),
     amount: baht("amount").notNull(), // liters × price, from domain/money.ts at save time
+    /** "HH:MM" on the bill (B1, B9): with the date it puts the bills in the order their fuel is used up */
+    purchaseTime: text("purchase_time"),
     billNo: text("bill_no"), // เลขที่บิลหรือใบกำกับภาษี
     note: text("note"),
     createdBy: uuid("created_by").references(() => users.id),
@@ -178,6 +180,8 @@ export const appSettings = pgTable("app_settings", {
   openingDate: date("opening_date", { mode: "string" }),
   /** day of the month a claim cycle is cut on (1–28); null = the last day of the calendar month */
   cycleCutDay: integer("cycle_cut_day"),
+  /** price per liter of the opening stock (B8): it is used up before the first bill; null = those liters wait for a price */
+  openingPrice: numeric("opening_price", { precision: 8, scale: 2, mode: "number" }),
 });
 
 // ───────────── claim cycles & invoices ─────────────
@@ -347,6 +351,29 @@ export const fuelIssueLines = pgTable(
     index("fuel_issue_lines_machine_idx").on(t.machineId),
     check("fuel_issue_lines_liters_positive", sql`${t.liters} > 0`),
   ],
+);
+
+/**
+ * A line cut into the bills its liters came from (brief §14, oldest fuel first): one row per price.
+ * 600 liters over two bills = [100 @32.50, 500 @33.10]. `kind`: bill | opening (the opening stock) | none (liters no
+ * bill covers yet → no price). Rewritten for slips of open cycles whenever a bill or a slip changes; kept as billed
+ * once the cycle is closed.
+ */
+export const fuelIssueLineParts = pgTable(
+  "fuel_issue_line_parts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    lineId: uuid("line_id")
+      .notNull()
+      .references(() => fuelIssueLines.id, { onDelete: "cascade" }),
+    seq: integer("seq").notNull(),
+    kind: text("kind").notNull(),
+    purchaseId: uuid("purchase_id").references(() => fuelPurchases.id, { onDelete: "set null" }),
+    liters: liters("liters").notNull(),
+    pricePerLiter: numeric("price_per_liter", { precision: 8, scale: 2, mode: "number" }),
+    amount: baht("amount"),
+  },
+  (t) => [index("fuel_issue_line_parts_line_idx").on(t.lineId)],
 );
 
 /** several photos per issue (meter photos) — stage 2 uses it, the table exists so stage 1 doesn't need a migration */

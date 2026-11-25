@@ -2,12 +2,13 @@ import { redirect } from "next/navigation";
 import { MonthSelect } from "@/components/month-select";
 import { Card, StateBox, linkButton } from "@/components/ui";
 import { isMonth } from "@/domain/iso-date";
-import { thaiLong } from "@/domain/thai-date";
+import { thaiLong, thaiShort } from "@/domain/thai-date";
 import { formatBaht } from "@/lib/format";
 import { canOpen } from "@/lib/nav";
 import { canWriteFuel } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
 import { loadLedgerMonth, loadLedgerNotes } from "@/server/ledger/ledger-service";
+import { stockByBill } from "@/server/prices/fifo-service";
 import { MeasuredInput } from "./measured-input";
 import { NoteInput } from "./note-input";
 
@@ -28,6 +29,8 @@ export default async function LedgerPage({ searchParams }: { searchParams: SP })
   const { rows, summary, through, months } = await loadLedgerMonth(month, today);
   const notes = rows.length ? await loadLedgerNotes(rows[0].date, rows[rows.length - 1].date) : {};
   const monthOptions = months.includes(month) ? months : [month, ...months];
+  // what is in the truck now, by the bill it came from: the oldest is used next (brief §14)
+  const left = await stockByBill();
 
   const stat = (label: string, liters: number) => (
     <div className="flex flex-[1_1_180px] flex-col gap-0.5">
@@ -62,6 +65,27 @@ export default async function LedgerPage({ searchParams }: { searchParams: SP })
         </div>
       </Card>
 
+      <Card data-testid="stock-by-bill" className="flex flex-col gap-2 px-6 py-5">
+        <h2 className="font-display text-lg font-medium leading-snug">น้ำมันที่เหลือในรถตอนนี้ แยกตามบิลซื้อ</h2>
+        {left.lots.length === 0 ? (
+          <span className="text-muted">ไม่มีน้ำมันของบิลใดเหลืออยู่</span>
+        ) : (
+          <>
+            <span>
+              รวม {formatBaht(left.liters)} ลิตร มูลค่า {formatBaht(left.amount)} บาท
+            </span>
+            <ul className="flex flex-col gap-0.5 text-[14px] text-muted">
+              {left.lots.map((l, i) => (
+                <li key={l.purchaseId ?? "opening"}>
+                  {i === 0 ? "ใช้ถัดไป: " : ""}
+                  {l.purchaseId === null ? "ยอดยกมา" : `บิลซื้อ ${thaiShort(l.at.slice(0, 10))} ${l.at.slice(11)} น.`} เหลือ {formatBaht(l.liters)} ลิตร {l.price === null ? "รอราคา" : `× ${formatBaht(l.price)} บาท`}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </Card>
+
       {rows.some((r) => r.negative) && (
         <p role="status" className="rounded-control border border-repair bg-repair-soft px-4 py-3 text-sm">
           ยอดคงเหลือติดลบ ส่วนใหญ่แปลว่ายังไม่ได้คีย์ซื้อน้ำมันเข้า ตรวจว่าบันทึกซื้อน้ำมันเข้าครบหรือยัง
@@ -78,7 +102,7 @@ export default async function LedgerPage({ searchParams }: { searchParams: SP })
                 <tr>
                   <th>วัน/เดือน/ปี</th>
                   <th className="n">จำนวนเงินเติม</th>
-                  <th className="n">ราคา/ลิตร</th>
+                  <th className="n">ราคาบิลล่าสุด</th>
                   <th className="n">เติมเข้า/ลิตร</th>
                   <th className="n">ออก/ลิตร</th>
                   <th className="n">คงเหลือ/ลิตร</th>
