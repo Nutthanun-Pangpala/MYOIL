@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login, resetData } from "./helpers";
+import { keyIssue, login, resetData } from "./helpers";
+
+const TODAY = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
 
 test.describe.configure({ mode: "serial" });
 test.beforeAll(resetData);
@@ -164,6 +166,40 @@ test("machines: add, duplicate refused, rented has no asset code", async ({ page
   await expect(g.getByLabel("รหัสทรัพย์สิน (ไม่บังคับ)")).toHaveCount(0);
   await g.getByRole("button", { name: "เพิ่มเครื่องจักร" }).click();
   await expect(page.getByRole("row").filter({ hasText: "PC30 เช่า" })).toContainText("เช่า");
+
+  // delete (owner, 26 Nov 2026): asked first; a machine no slip used is gone, and its code can be added again
+  await page.getByRole("button", { name: "ลบเครื่องจักร PC30 เช่า" }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg).toContainText("ยังไม่เคยถูกใช้ในใบจ่าย");
+  await dlg.getByRole("button", { name: "ลบเครื่องจักรนี้" }).click();
+  await expect(page.getByText("ลบเครื่องจักร PC30 เช่า แล้ว")).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "PC30 เช่า" })).toHaveCount(0);
+});
+
+test("machines: one that slips already name is only taken off the lists, and comes back when its code is added again", async ({ page }) => {
+  await login(page, "store");
+  await keyIssue(page, { book: "40", doc: "1", date: TODAY, machine: "DEL-1", liters: "10" });
+  await page.context().clearCookies(); // sign out: settings are the system admin's
+  await login(page, "admin");
+  await page.goto("/settings/machines");
+  await page.getByRole("button", { name: "ลบเครื่องจักร DEL-1" }).click();
+  const dlg = page.getByRole("dialog");
+  await expect(dlg).toContainText("ถูกใช้ในใบจ่าย 1 ใบ");
+  await dlg.getByRole("button", { name: "ลบเครื่องจักรนี้" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "DEL-1" })).toHaveCount(0);
+  // the slip still names it
+  await page.goto("/issues");
+  await expect(page.getByRole("row").filter({ hasText: "40 / 1" })).toContainText("DEL-1");
+  // and it is no longer offered on the slip form
+  await page.goto("/issues/new");
+  await expect(page.locator("datalist option[value='DEL-1']")).toHaveCount(0);
+  // adding the code again brings it back
+  await page.goto("/settings/machines");
+  await page.getByRole("button", { name: "เพิ่มเครื่องจักร" }).first().click();
+  const f = page.getByRole("form", { name: "เพิ่มเครื่องจักร" });
+  await f.getByLabel("รหัสหรือทะเบียน").fill("DEL-1");
+  await f.getByRole("button", { name: "เพิ่มเครื่องจักร" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "DEL-1" })).toHaveCount(1);
 });
 
 test("tank: bad numbers are said at the field, good ones save", async ({ page }) => {

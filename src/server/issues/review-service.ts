@@ -63,7 +63,7 @@ export async function getReview(issueId: string): Promise<ReviewInfo | null> {
     .where(eq(fuelIssueLines.issueId, issueId))
     .orderBy(asc(fuelIssueLines.position));
   const anyHeld = lines.some((l) => l.machinePending);
-  const known = anyHeld ? await db.select({ id: machines.id, code: machines.code }).from(machines).where(eq(machines.pendingReview, false)).orderBy(asc(machines.code)) : [];
+  const known = anyHeld ? await db.select({ id: machines.id, code: machines.code }).from(machines).where(and(eq(machines.pendingReview, false), isNull(machines.deletedAt))).orderBy(asc(machines.code)) : [];
   return {
     status: h.i.reviewStatus as ReviewInfo["status"],
     flags: withDateFlags(h.i.flags, h.i.issueDate, h.i.receivedAt?.toISOString() ?? null),

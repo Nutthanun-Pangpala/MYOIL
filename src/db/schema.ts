@@ -266,6 +266,12 @@ export const machines = pgTable("machines", {
   isRented: boolean("is_rented").notNull().default(false),
   /** stage 2: a name a driver typed on the phone that matches nothing — held until an admin merges or accepts it */
   pendingReview: boolean("pending_review").notNull().default(false),
+  /**
+   * "ลบ" on ตั้งค่า › เครื่องจักร (owner, 26 Nov 2026). A machine no slip ever used is really deleted; one that slips point at
+   * only gets this stamp: gone from every list and picker, while its old slips, reports and invoices still show it.
+   * Typing the same code again (in settings or on a slip) brings it back.
+   */
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: stamp("created_at"),
 });
 

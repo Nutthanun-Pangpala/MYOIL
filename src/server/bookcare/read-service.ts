@@ -21,7 +21,7 @@ export async function machinesForPhone(today: string): Promise<MachineRow[]> {
   const all = await db
     .select({ id: machines.id, code: machines.code, name: machines.name, isRented: machines.isRented })
     .from(machines)
-    .where(eq(machines.pendingReview, false))
+    .where(and(eq(machines.pendingReview, false), isNull(machines.deletedAt)))
     .orderBy(machines.code);
   const used = await db
     .select({

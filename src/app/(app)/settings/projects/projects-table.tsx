@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { ConfirmDialog } from "@/components/dialog";
 import { Toast } from "@/components/toast";
 import { Button, Card, CardTitle, Field, Pill, ProjectChip, StateBox, fieldBadClass, fieldClass } from "@/components/ui";
@@ -23,6 +23,11 @@ export function ProjectsTable({ rows }: { rows: Row[] }) {
   const [busy, start] = useTransition();
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [q, setQ] = useState("");
+  // text typed before the page finished loading is in the box but not in React yet: pick it up, or the list would not filter
+  useEffect(() => {
+    const typed = (document.getElementById("s-q") as HTMLInputElement | null)?.value;
+    if (typed) setQ(typed);
+  }, []);
   const [show, setShow] = useState<"all" | "open" | "closed">("all");
   const [done, setDone] = useState<{ n: number; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);

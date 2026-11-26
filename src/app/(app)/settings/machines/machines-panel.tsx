@@ -2,23 +2,62 @@
 
 import { MACHINE_CODE_MAX } from "@/domain/settings-rules";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { ConfirmDialog } from "@/components/dialog";
 import { Toast } from "@/components/toast";
 import { Button, Card, CardTitle, Field, Pill, StateBox, fieldBadClass, fieldClass } from "@/components/ui";
-import { saveMachineAction } from "../actions";
+import { deleteMachineAction, machineUseAction, saveMachineAction } from "../actions";
 import { SettingsHeader } from "../settings-header";
 
 type Row = { id: string; code: string; name: string | null; type: string | null; assetCode: string | null; isRented: boolean };
 const TYPES = ["รถขุด", "รถ", "เครื่องจักร", "อื่น ๆ"];
-const rowLink = "min-h-11 whitespace-nowrap px-1 text-earth underline hover:text-ink";
+const rowLink = "inline-flex min-h-11 min-w-11 items-center justify-center whitespace-nowrap px-2 text-earth underline hover:text-ink disabled:opacity-60";
 
 /** design 6.11 เครื่องจักร: the list on the left, the add / edit form beside it */
 export function MachinesPanel({ rows }: { rows: Row[] }) {
   const router = useRouter();
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [q, setQ] = useState("");
+  // text typed before the page finished loading is in the box but not in React yet: pick it up, or the list would not filter
+  useEffect(() => {
+    const typed = (document.getElementById("sm-q") as HTMLInputElement | null)?.value;
+    if (typed) setQ(typed);
+  }, []);
   const [done, setDone] = useState<{ n: number; text: string } | null>(null);
   const cur = rows.find((r) => r.id === editing);
+  // "ลบ" (owner, 26 Nov 2026): asked first; the window says what will happen to slips that already name the machine
+  const [busy, start] = useTransition();
+  const [gone, setGone] = useState<{ row: Row; slips: number | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  function ask(row: Row) {
+    setError(null);
+    setGone({ row, slips: null });
+    start(async () => {
+      try {
+        const use = await machineUseAction(row.id);
+        setGone((g) => (g && g.row.id === row.id ? { row, slips: use?.slips ?? 0 } : g));
+      } catch {
+        setError("ตรวจไม่ได้ว่าเครื่องนี้ถูกใช้ในใบจ่ายกี่ใบ ตรวจอินเทอร์เน็ตแล้วลองอีกครั้ง");
+      }
+    });
+  }
+  function remove() {
+    if (!gone) return;
+    setError(null);
+    start(async () => {
+      try {
+        const r = await deleteMachineAction(gone.row.id);
+        if (r.ok) {
+          if (editing === gone.row.id) setEditing(null);
+          setGone(null);
+          setDone((d) => ({ n: (d?.n ?? 0) + 1, text: r.message ?? "ลบแล้ว" }));
+          router.refresh();
+        } else setError(r.message ?? "ลบไม่สำเร็จ");
+      } catch {
+        setError("ลบไม่สำเร็จ ตรวจอินเทอร์เน็ตแล้วลองอีกครั้ง");
+      }
+    });
+  }
   const term = q.trim().toLowerCase();
   const shown = term ? rows.filter((r) => `${r.code} ${r.name ?? ""} ${r.assetCode ?? ""}`.toLowerCase().includes(term)) : rows;
 
@@ -47,9 +86,7 @@ export function MachinesPanel({ rows }: { rows: Row[] }) {
                     <th>ประเภท</th>
                     <th>รหัสทรัพย์สิน</th>
                     <th>ของบริษัทหรือเช่า</th>
-                    <th>
-                      <span className="sr-only">แก้ไข</span>
-                    </th>
+                    <th>จัดการ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -63,9 +100,14 @@ export function MachinesPanel({ rows }: { rows: Row[] }) {
                         <Pill tone={r.isRented ? "wait" : "ok"}>{r.isRented ? "เช่า" : "ของบริษัท"}</Pill>
                       </td>
                       <td>
-                        <button type="button" className={rowLink} onClick={() => setEditing(r.id)}>
-                          แก้ไข
-                        </button>
+                        <span className="flex gap-3">
+                          <button type="button" className={rowLink} aria-label={`แก้ไขเครื่องจักร ${r.code}`} onClick={() => setEditing(r.id)}>
+                            แก้ไข
+                          </button>
+                          <button type="button" className={`${rowLink} text-repair-ink`} aria-label={`ลบเครื่องจักร ${r.code}`} onClick={() => ask(r)}>
+                            ลบ
+                          </button>
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -89,6 +131,29 @@ export function MachinesPanel({ rows }: { rows: Row[] }) {
           />
         )}
       </div>
+      <ConfirmDialog open={gone !== null} title={`ลบเครื่องจักร ${gone?.row.code ?? ""} ใช่ไหม`} onClose={() => setGone(null)}>
+        {gone?.slips === null ? (
+          <p className="text-muted">กำลังตรวจว่าเครื่องนี้ถูกใช้ในใบจ่ายหรือไม่</p>
+        ) : gone?.slips === 0 ? (
+          <p>เครื่องนี้ยังไม่เคยถูกใช้ในใบจ่าย จะถูกลบออกจากระบบ</p>
+        ) : (
+          <p>
+            เครื่องนี้ถูกใช้ในใบจ่าย {gone?.slips} ใบ จะถูกเอาออกจากรายการเครื่องจักร และเลือกในใบจ่ายใหม่หรือบนมือถือ พขร. ไม่ได้ ใบจ่าย รายงาน และใบแจ้งเดิมยังแสดงเครื่องนี้ตามเดิม
+          </p>
+        )}
+        <p className="text-sm text-muted">ถ้าลบผิด เพิ่มเครื่องจักรด้วยรหัสเดิมอีกครั้ง เครื่องจะกลับมาพร้อมประวัติเดิม</p>
+        {error && (
+          <p role="alert" className="text-sm text-repair">
+            {error}
+          </p>
+        )}
+        <div className="flex flex-wrap justify-between gap-6 pt-1">
+          <Button onClick={() => setGone(null)}>ไม่ลบ</Button>
+          <Button variant="danger" disabled={busy || gone?.slips === null} onClick={remove}>
+            ลบเครื่องจักรนี้
+          </Button>
+        </div>
+      </ConfirmDialog>
       {done && <Toast key={done.n}>{done.text}</Toast>}
     </>
   );

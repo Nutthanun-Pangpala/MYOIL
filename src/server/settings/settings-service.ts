@@ -8,7 +8,7 @@ import { hashSecret } from "@/lib/password";
 import { cutDay, cycleIdFor } from "../cycles/cycle-service";
 import { repriceOpenLines } from "../prices/fifo-service";
 
-const { projects, machines, users, userProjects, appSettings, claimCycles, fuelIssues } = schema;
+const { projects, machines, users, userProjects, appSettings, claimCycles, fuelIssues, fuelIssueLines } = schema;
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
 
 export type Result<E = Record<string, string>> = { ok: true; message?: string } | { ok: false; message?: string; errors?: E };
@@ -82,8 +82,40 @@ export async function listMachines(q: string) {
   return db
     .select({ id: machines.id, code: machines.code, name: machines.name, type: machines.type, assetCode: machines.assetCode, isRented: machines.isRented })
     .from(machines)
-    .where(term ? or(ilike(machines.code, `%${term}%`), ilike(machines.name, `%${term}%`), ilike(machines.assetCode, `%${term}%`)) : undefined)
+    .where(and(isNull(machines.deletedAt), term ? or(ilike(machines.code, `%${term}%`), ilike(machines.name, `%${term}%`), ilike(machines.assetCode, `%${term}%`)) : undefined))
     .orderBy(asc(machines.code));
+}
+
+/** how many slips (cancelled ones too) have a line for this machine */
+async function slipsOfMachine(id: string): Promise<number> {
+  const [r] = await db.select({ n: sql<number>`count(distinct ${fuelIssueLines.issueId})::int` }).from(fuelIssueLines).where(eq(fuelIssueLines.machineId, id));
+  return Number(r?.n ?? 0);
+}
+
+/** what "ลบ" will do, said in the confirm window before anything happens */
+export async function machineUse(id: string): Promise<{ code: string; slips: number } | null> {
+  const [m] = await db.select({ code: machines.code }).from(machines).where(and(eq(machines.id, id), isNull(machines.deletedAt))).limit(1);
+  return m ? { code: m.code, slips: await slipsOfMachine(id) } : null;
+}
+
+/**
+ * "ลบ" a machine (owner, 26 Nov 2026). Never used on a slip → the row is deleted. Used → it is only taken off every
+ * list and picker (`deleted_at`): slips, reports and invoices that already name it keep it.
+ */
+export async function deleteMachine(id: string): Promise<Result> {
+  const [m] = await db.select({ code: machines.code, deletedAt: machines.deletedAt }).from(machines).where(eq(machines.id, id)).limit(1);
+  if (!m || m.deletedAt) return { ok: false, message: "ไม่พบเครื่องจักรนี้ อาจถูกลบไปแล้ว" };
+  const slips = await slipsOfMachine(id);
+  if (slips === 0) {
+    try {
+      await db.delete(machines).where(eq(machines.id, id));
+      return { ok: true, message: `ลบเครื่องจักร ${m.code} แล้ว` };
+    } catch {
+      // a slip took it in the meantime: fall through and only hide it
+    }
+  }
+  await db.update(machines).set({ deletedAt: new Date() }).where(eq(machines.id, id));
+  return { ok: true, message: `ลบเครื่องจักร ${m.code} ออกจากรายการแล้ว ใบจ่ายเดิม ${slips} ใบยังแสดงเครื่องนี้ตามเดิม` };
 }
 
 export type MachineInput = { code: string; name: string; type: string; assetCode: string; isRented: boolean };
@@ -91,9 +123,12 @@ export type MachineInput = { code: string; name: string; type: string; assetCode
 export async function saveMachine(id: string | null, m: MachineInput): Promise<Result> {
   const errors: Record<string, string> = { ...validateMachine(m) };
   const key = machineKey(m.code);
+  let revive: string | null = null;
   if (!errors.code) {
-    const [dup] = await db.select({ id: machines.id, code: machines.code }).from(machines).where(and(eq(machines.key, key), id ? ne(machines.id, id) : undefined)).limit(1);
-    if (dup) errors.code = `มีเครื่องจักร “${dup.code}” อยู่แล้ว`;
+    const [dup] = await db.select({ id: machines.id, code: machines.code, deletedAt: machines.deletedAt }).from(machines).where(and(eq(machines.key, key), id ? ne(machines.id, id) : undefined)).limit(1);
+    // the same code as a machine that was deleted: adding it again brings that machine back (its old slips are still its own)
+    if (dup && dup.deletedAt && !id) revive = dup.id;
+    else if (dup) errors.code = dup.deletedAt ? `รหัสนี้เป็นของเครื่องจักร “${dup.code}” ที่ถูกลบไป เพิ่มเครื่องนี้ใหม่จากปุ่ม “เพิ่มเครื่องจักร” เพื่อนำกลับมา` : `มีเครื่องจักร “${dup.code}” อยู่แล้ว`;
   }
   if (Object.keys(errors).length) return { ok: false, errors };
   const values = {
@@ -104,7 +139,8 @@ export async function saveMachine(id: string | null, m: MachineInput): Promise<R
     assetCode: m.isRented ? null : m.assetCode.trim() || null,
     isRented: m.isRented,
   };
-  if (id) await db.update(machines).set(values).where(eq(machines.id, id));
+  if (revive) await db.update(machines).set({ ...values, deletedAt: null, pendingReview: false }).where(eq(machines.id, revive));
+  else if (id) await db.update(machines).set(values).where(eq(machines.id, id));
   else await db.insert(machines).values(values);
   return { ok: true, message: id ? "บันทึกเครื่องจักรแล้ว" : "เพิ่มเครื่องจักรแล้ว" };
 }
