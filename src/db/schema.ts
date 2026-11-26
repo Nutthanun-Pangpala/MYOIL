@@ -62,7 +62,17 @@ export const projects = pgTable("projects", {
   projectCode: text("project_code"), // accounting code, NOT unique
   name: text("name").notNull(),
   isActive: boolean("is_active").notNull().default(true),
+  /** last time BookCare's list carried it (for a project added by hand: when it was added) */
   syncedAt: stamp("synced_at"),
+  /** added by an admin in MYOIL, not sent by BookCare */
+  addedLocally: boolean("added_locally").notNull().default(false),
+  /**
+   * set when an admin adds, edits, opens or closes it on ตั้งค่า › โครงการ. From then on MYOIL's values win:
+   * the BookCare sync leaves its code, name and open/closed alone (owner, 26 Nov 2026: sync AND add by hand).
+   */
+  localEditAt: timestamp("local_edit_at", { withTimezone: true }),
+  /** where the site is, for the driver and the receiver: address, district, landmark (OBS-23). MYOIL's own; the BookCare sync never touches it */
+  siteDetail: text("site_detail"),
 });
 
 /** project_viewer sees only these projects */

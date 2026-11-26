@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 export const PASSWORD = "myoil1234";
 export const USERS = {
@@ -8,6 +8,15 @@ export const USERS = {
   exec: "exec@myoil.local",
   admin: "admin@myoil.local",
 } as const;
+
+// 1×1 PNG: the browser really decodes it, then re-encodes it as a small JPEG
+const TINY_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+
+/** a new purchase bill always carries its photo (owner, 26 Nov 2026): attach one to the open "บันทึกการซื้อ" form */
+export async function attachBill(form: Locator) {
+  await form.getByLabel(/รูปบิล/).setInputFiles({ name: "bill.png", mimeType: "image/png", buffer: TINY_PNG });
+  await expect(form.getByText("แนบแล้ว: bill.png")).toBeVisible();
+}
 
 /** same starting point for every spec file: demo accounts, no fuel records */
 export function resetData() {
@@ -51,6 +60,7 @@ export async function recordPurchase(page: Page, p: { date: string; liters: stri
   await form.getByLabel("เติมเข้า (ลิตร)").fill(p.liters);
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill(p.price);
   if (p.billNo) await form.getByLabel(/เลขที่บิล/).fill(p.billNo);
+  await attachBill(form);
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   // a bill that would change the money of slips already priced asks first ("ยืนยันบันทึก", brief §14 B5);
   // one that prices or reprices open slips says so and waits for "รับทราบ"; otherwise the form closes by itself

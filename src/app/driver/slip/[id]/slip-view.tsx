@@ -5,7 +5,7 @@ import { useRef, useState } from "react";
 import { Notice, Screen, Sheet, Thumb, btnLine, btnYellow, linkBtn } from "@/components/driver/flow";
 import { MachineArt } from "@/components/driver/machine-art";
 import { SignaturePad, type SignatureHandle } from "@/components/driver/signature-pad";
-import { bangkok, machineArt } from "@/domain/driver-fill";
+import { bangkok, machineArt, siteName } from "@/domain/driver-fill";
 import { thaiLong } from "@/domain/thai-date";
 import { post } from "@/lib/driver/outbox";
 import type { DriverSlip } from "@/server/driver/slip-service";
@@ -40,6 +40,12 @@ export function SlipView({ slip, when }: { slip: DriverSlip; when: string }) {
       }
     >
       <div className="flex flex-col gap-[8px]">
+        <div className="flex flex-col gap-[2px]">
+          <span className="break-words font-display text-[22px] font-semibold leading-[1.25]" data-testid="slip-site">
+            {siteName(slip.name, slip.code)}
+          </span>
+          {slip.detail && <span className="text-[15px] text-muted">{slip.detail}</span>}
+        </div>
         <div className="flex items-baseline justify-between gap-[10px]">
           <span className="text-muted">เลขที่ใบ</span>
           <span className="font-display text-[18px] font-medium" data-testid="slip-no">
@@ -124,7 +130,7 @@ function LateSign({ slip, total, onBack, onDone }: { slip: DriverSlip; total: nu
     setBusy(true);
     setError(null);
     const now = bangkok(new Date());
-    const image = await pad.current!.toShot([`ผู้รับ ${name.trim()}`, `${thaiLong(now.date)} ${now.time}  ${slip.code}  ${fmt(total)} ลิตร`]);
+    const image = await pad.current!.toShot([`ผู้รับ ${name.trim()}`, `${thaiLong(now.date)} ${now.time}  ${slip.code}  ${fmt(total)} ลิตร`, siteName(slip.name, slip.code)]);
     const r = await post(`/api/driver/issues/${slip.ref}/signature`, { signatureRef, receiverName: name.trim(), signedAt: now.stamp, image: { mime: "image/jpeg", ...image } });
     setBusy(false);
     if (r.ok) onDone();

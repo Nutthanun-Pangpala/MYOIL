@@ -38,6 +38,8 @@ export type IssueContext = {
   duplicateIssueId: string | null;
   /** label like "ก.ย. 2569" when the date falls in a closed cycle */
   closedCycleLabel: string | null;
+  /** today in Bangkok (ISO). Given → a slip cannot be dated after it (BA, 26 Nov 2026: no fill happens in the future) */
+  today?: string;
   /** by machineKey(machine) */
   history: Record<string, MachineHistory>;
 };
@@ -67,6 +69,8 @@ export const LITER_WARN_MIN_FILLS = 3;
 /** same machine however it was typed: trim, collapse spaces, ignore case */
 export const machineKey = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
+export const FUTURE_DATE = "ลงวันที่ล่วงหน้าไม่ได้ วันที่ในใบต้องไม่เกินวันนี้";
+
 export function checkIssue(input: IssueInput, ctx: IssueContext): IssueCheck {
   const errors: IssueErrors = { lines: {} };
   const warnings: IssueWarning[] = [];
@@ -76,6 +80,7 @@ export function checkIssue(input: IssueInput, ctx: IssueContext): IssueCheck {
   else if (ctx.duplicateIssueId) errors.doc = "เล่มที่และเลขที่นี้มีอยู่แล้วในระบบ";
 
   if (!input.issueDate) errors.date = "ใส่วันที่";
+  else if (ctx.today && input.issueDate > ctx.today) errors.date = FUTURE_DATE;
   else if (ctx.closedCycleLabel) {
     errors.date = `วันที่นี้อยู่ในรอบ ${ctx.closedCycleLabel} ที่ปิดแล้ว ต้องให้ผู้ดูแลระบบเปิดรอบอีกครั้งก่อน`;
   }

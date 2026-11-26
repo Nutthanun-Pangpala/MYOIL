@@ -39,7 +39,7 @@ export type PurchasePage = {
 export type SaveResult =
   | { ok: true; warnings: string[] }
   /** `confirm` = it looks odd: ask the person, then send again with confirmed (OBS-17) */
-  | { ok: false; error: string; field?: "date" | "time" | "liters" | "price" | "amount" | "photo"; confirm?: string[] };
+  | { ok: false; error: string; field?: "date" | "time" | "liters" | "price" | "amount" | "photo" | "reason"; confirm?: string[] };
 
 export async function loadPurchasePage(month: string, today: string): Promise<PurchasePage> {
   const { start, end } = monthRange(month);
@@ -106,7 +106,10 @@ function repriceWarnings(r: Repriced): string[] {
 }
 
 
-export async function createPurchase(session: Session, input: PurchaseInput): Promise<SaveResult> {
+export const PHOTO_NEEDED = "แนบรูปบิลก่อนบันทึก ราคาของใบจ่ายมาจากบิลใบนี้";
+
+/** `photoOptional`: demo-data scripts only. From the office form a bill always carries its photo (owner, 26 Nov 2026). */
+export async function createPurchase(session: Session, input: PurchaseInput, opts: { photoOptional?: boolean } = {}): Promise<SaveResult> {
   if (!input.date) return { ok: false, error: "เลือกวันที่ซื้อ", field: "date" };
   if (!input.time) return { ok: false, error: "ใส่เวลาบนบิล เช่น 09:30 (ใช้เรียงว่าน้ำมันบิลไหนถูกใช้ก่อน)", field: "time" };
   const calc = completePurchase({ liters: input.liters, price: input.price, amount: input.amount });
@@ -122,6 +125,7 @@ export async function createPurchase(session: Session, input: PurchaseInput): Pr
     }
     photo = { mime: input.billPhoto.mime, data };
   }
+  if (!photo && !opts.photoOptional) return { ok: false, error: PHOTO_NEEDED, field: "photo" };
 
   const odd = input.confirmed ? [] : purchaseOddities({ liters: calc.liters, price: calc.price, dailyPrice: null, capacity: await tankCapacity() });
 
@@ -191,6 +195,9 @@ export async function updatePurchase(session: Session, id: string, input: Purcha
     note("billNo", cur.billNo ?? "", input.billNo);
     note("note", cur.note ?? "", input.note);
     if (Object.keys(changes).length === 0) return { ok: true as const, warnings: ["ไม่มีอะไรเปลี่ยน"] };
+    // BA, 26 Nov 2026 (OBS-05): a changed bill needs a reason, as a changed slip does — it is kept in the bill's history
+    if (!input.reason) return { ok: false as const, error: "ใส่เหตุผลที่แก้ไขรายการซื้อ", field: "reason" as const };
+    changes.reason = ["-", input.reason];
 
     await tx
       .update(schema.fuelPurchases)

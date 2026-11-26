@@ -110,7 +110,7 @@ export default async function IssueDetail({
         "ยังไม่เซ็น"
       ),
     ],
-    ["คีย์โดย", head.source === "mobile" ? "มือถือของ พขร. (BookCare)" : head.recordedByName],
+    ["คีย์โดย", head.source === "mobile" ? "มือถือของ พขร." : head.recordedByName],
   ];
 
   return (

@@ -32,7 +32,7 @@ export default async function StopPage({ params }: { params: Promise<{ stopId: s
 
   return (
     <StopFlow
-      stop={{ id: stop.id, position: stop.position, code: stop.projectRefCode, name: stop.projectName, note: stop.note, skipped: stop.status === "skipped", skipReason: stop.skipReason }}
+      stop={{ id: stop.id, position: stop.position, code: stop.projectRefCode, name: stop.projectName, detail: stop.projectDetail, note: stop.note, skipped: stop.status === "skipped", skipReason: stop.skipReason }}
       dots={route.stops.map((x) => (x.id === stop.id ? "here" : x.status))}
       date={today}
       driverName={s.name}

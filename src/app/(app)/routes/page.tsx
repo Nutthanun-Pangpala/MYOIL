@@ -21,7 +21,7 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
 const time = (d: Date) => d.toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit", hour12: false });
 
-// วางเส้นทางรถเติมน้ำมัน (brief §8, R20–R23): the admin plans the day; the driver's phone (BookCare) fills or skips each stop
+// วางเส้นทางรถเติมน้ำมัน (brief §8, R20–R23): the admin plans the day; the driver's phone (/driver) fills or skips each stop
 export default async function RoutesPage({ searchParams }: { searchParams: SP }) {
   const session = await requireUser();
   if (!canOpen(session.role, "/routes")) redirect("/");
@@ -112,6 +112,7 @@ export default async function RoutesPage({ searchParams }: { searchParams: SP })
                       <td>
                         <div className="font-display font-semibold">{s.projectRefCode}</div>
                         <div className="text-[13px] text-muted">{s.projectName}</div>
+                        {s.projectDetail ? <div className="text-[13px] text-muted">ที่ตั้ง: {s.projectDetail}</div> : <div className="text-[13px] text-repair-ink">ยังไม่ใส่ที่ตั้งไซต์ (พขร. จะเห็นแค่ชื่อ)</div>}
                       </td>
                       <td>
                         {writer && open ? (
@@ -191,12 +192,24 @@ export default async function RoutesPage({ searchParams }: { searchParams: SP })
           </div>
         )}
 
-        {writer && (
+        {writer && projectList.length === 0 && (
+          <p role="status" data-testid="no-projects" className="rounded-control border border-repair bg-card px-4 py-3">
+            <strong className="text-repair">ยังไม่มีโครงการที่เปิดอยู่</strong> จึงเพิ่มจุดเติมไม่ได้{" "}
+            {canOpen(session.role, "/settings") ? (
+              <Link href="/settings/projects" className="font-semibold text-earth underline">
+                ไปเพิ่มหรือเปิดโครงการที่ ตั้งค่า › โครงการ
+              </Link>
+            ) : (
+              "ให้ผู้ดูแลระบบเพิ่มหรือเปิดโครงการที่ ตั้งค่า › โครงการ"
+            )}
+          </p>
+        )}
+        {writer && projectList.length > 0 && (
           <form action={addStopAction} className="flex flex-wrap items-end gap-3 border-t border-line pt-4" aria-label="เพิ่มจุดเติม">
             <input type="hidden" name="date" value={date} />
             <label className="flex min-w-[260px] flex-1 flex-col gap-1">
               <span className="text-[13px] text-muted">โครงการ</span>
-              <select name="projectId" required defaultValue="" className="min-h-11 rounded-control border border-idle bg-card px-3">
+              <select name="projectId" defaultValue="" className="min-h-11 rounded-control border border-idle bg-card px-3">
                 <option value="" disabled>
                   เลือกโครงการ
                 </option>
@@ -217,7 +230,7 @@ export default async function RoutesPage({ searchParams }: { searchParams: SP })
           </form>
         )}
       </Card>
-      <p className="text-[13px] text-muted">สถานะมาจากมือถือของ พขร. ผ่าน BookCare: เติมแล้ว = มีใบจ่ายของจุดนั้น · ข้าม = พขร. กดข้ามพร้อมเหตุผล จุดที่เพิ่มระหว่างวันจะขึ้นที่มือถือเมื่อมีสัญญาณ</p>
+      <p className="text-[13px] text-muted">สถานะมาจากมือถือของ พขร.: เติมแล้ว = มีใบจ่ายของจุดนั้น · ข้าม = พขร. กดข้ามพร้อมเหตุผล จุดที่เพิ่มระหว่างวันจะขึ้นที่มือถือเมื่อมีสัญญาณ</p>
     </>
   );
 }

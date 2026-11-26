@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { TruckIcon } from "@/components/driver/truck-art";
-import { bangkok, totalLiters } from "@/domain/driver-fill";
+import { bangkok, totalLiters, siteName } from "@/domain/driver-fill";
 import { flush } from "@/lib/driver/outbox";
 import { useLocal, type LocalState, type OutItem } from "@/lib/driver/store";
 
-export type HomeStop = { id: string; position: number; code: string; name: string; note: string | null; status: "pending" | "filled" | "skipped"; issueId: string | null; skipReason: string | null; liters: number | null };
+export type HomeStop = { id: string; position: number; code: string; name: string; /** where the site is */ detail: string | null; note: string | null; status: "pending" | "filled" | "skipped"; issueId: string | null; skipReason: string | null; liters: number | null };
 
 const fmt = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 const dock = "flex min-h-[62px] w-full items-center justify-center gap-[10px] rounded-[16px] border px-[16px] text-center font-display text-[20px] font-medium no-underline";
@@ -145,7 +145,12 @@ export function HomeRoute({ stops }: { stops: HomeStop[] }) {
               className={`mb-[8px] flex min-w-0 flex-1 items-center gap-[10px] rounded-[16px] bg-card py-[6px] pl-[14px] pr-[12px] text-ink no-underline ${strong ? "min-h-[68px] border-2 border-earth shadow-[0_3px_0_var(--color-earth)]" : "min-h-[56px] border border-line shadow-[0_2px_0_var(--color-line)]"}`}
             >
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className={`font-display font-semibold leading-[1.25] ${strong ? "text-[22px]" : "text-[19px]"} ${st.status === "skipped" && !out && !draft ? "text-muted" : ""}`}>{st.code}</span>
+                {/* OBS-23: the site's name, big; its short code beside it, smaller; where it is, under it */}
+                <span className={`break-words font-display font-semibold leading-[1.25] ${strong ? "text-[22px]" : "text-[19px]"} ${st.status === "skipped" && !out && !draft ? "text-muted" : ""}`}>
+                  {siteName(st.name, st.code)}
+                  {siteName(st.name, st.code) !== st.code && <span className="ml-[8px] whitespace-nowrap rounded-[8px] bg-page px-[7px] py-[1px] align-middle text-[14px] font-medium text-earth">{st.code}</span>}
+                </span>
+                {st.detail && <span className="text-[14px] leading-[1.35] text-muted">{st.detail}</span>}
                 {draft ? (
                   <span className="text-[14px] leading-[1.35] text-muted">
                     กำลังเติม {draft.lines.length} เครื่อง เริ่ม {bangkok(new Date(draft.startedAt)).time}

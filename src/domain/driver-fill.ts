@@ -120,3 +120,12 @@ export function machineArt(code: string, type?: string | null): MachineArtKind {
   if (type === "รถ" || /รถ|ล้อ|กระบะ|\d{2}-\d{4}/.test(c)) return "truck";
   return "excavator";
 }
+
+/**
+ * How a site is named on the driver's phone (OBS-23): its name without the leading "โครงการ", big; the short code
+ * goes beside it, smaller. A new driver, or the person who signs, reads a name, not "DEMO2".
+ */
+export function siteName(name: string | null | undefined, code: string): string {
+  const n = (name ?? "").trim().replace(/^โครงการ\s*/, "").trim();
+  return n || code;
+}

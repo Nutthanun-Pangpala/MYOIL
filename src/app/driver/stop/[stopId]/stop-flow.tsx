@@ -7,14 +7,14 @@ import { Choices, Notice, Screen, Sheet, Thumb, btnLine, btnRed, btnYellow, link
 import { MachineArt } from "@/components/driver/machine-art";
 import { SignaturePad, type SignatureHandle } from "@/components/driver/signature-pad";
 import { TruckArt } from "@/components/driver/truck-art";
-import { MAX_DRAFT_LINES, SKIP_REASONS, UNSIGNED_REASONS, bangkok, isHighLiters, issueBody, litersValue, machineArt, totalLiters, typeLiters, type Draft, type DraftLine, type MachineArtKind, type Shot, type Signing } from "@/domain/driver-fill";
+import { MAX_DRAFT_LINES, SKIP_REASONS, UNSIGNED_REASONS, bangkok, isHighLiters, issueBody, litersValue, machineArt, totalLiters, typeLiters, type Draft, type DraftLine, type MachineArtKind, type Shot, type Signing, siteName } from "@/domain/driver-fill";
 import { thaiLong } from "@/domain/thai-date";
 import { post, sendOrKeep } from "@/lib/driver/outbox";
 import { shotUrl } from "@/lib/driver/photo";
 import { dropDraft, getDraft, saveDraft } from "@/lib/driver/store";
 
 export type FlowMachine = { art: MachineArtKind; id: string; code: string; name: string | null; isRented: boolean; here: boolean; maxLiters: number | null };
-type StopInfo = { id: string; position: number; code: string; name: string; note: string | null; skipped: boolean; skipReason: string | null };
+type StopInfo = { id: string; position: number; code: string; name: string; /** where the site is (address / landmark) */ detail: string | null; note: string | null; skipped: boolean; skipReason: string | null };
 type Dot = "here" | "pending" | "filled" | "skipped";
 type Step = "plan" | "fill" | "machines" | "camera" | "review" | "liters" | "sign";
 /** the machine being added (or the line being corrected) */
@@ -153,6 +153,7 @@ export function StopFlow({ stop, dots, date, driverName, machines }: { stop: Sto
     return (
       <Sign
         draft={draft}
+        stop={stop}
         artOf={artOf}
         onBack={() => setStep("fill")}
         onDone={async (signing) => {
@@ -311,10 +312,16 @@ function Plan({ stop, dots, ready, onStart, onSkipped }: { stop: StopInfo; dots:
             ))}
           </span>
         </div>
-        <span className="break-words font-display text-[clamp(48px,22vw,88px)] font-semibold leading-[1.05]" data-testid="stop-code">
-          {stop.code}
+        {/* OBS-23: a driver goes to a place, not to a code — the site's name is the big line, the code a tag, the address under it */}
+        <span className="break-words font-display text-[clamp(30px,10vw,44px)] font-semibold leading-[1.15]" data-testid="stop-name">
+          {siteName(stop.name, stop.code)}
         </span>
-        <span className="text-[18px] text-page">{stop.name}</span>
+        <span className="flex flex-wrap items-center gap-[10px]">
+          <span className="rounded-[10px] bg-safety px-[10px] py-[2px] font-display text-[20px] font-semibold text-ink" data-testid="stop-code">
+            {stop.code}
+          </span>
+          {stop.detail && <span className="text-[17px] text-page">{stop.detail}</span>}
+        </span>
         <div className="mt-auto flex flex-col items-end">
           <TruckArt id="stop-tank" level={0.3} width={170} />
           <span aria-hidden="true" className="mx-[-20px] h-[3px] self-stretch bg-idle" />
@@ -520,7 +527,7 @@ function Liters({ cur, code, onChange, onBack, onRetake, onSave, onDelete }: { c
 }
 
 // ── P5 สรุปและเซ็นรับ + ไม่มีผู้เซ็นรับ ──
-function Sign({ draft, artOf, onBack, onDone }: { draft: Draft; artOf: (l: DraftLine) => MachineArtKind; onBack: () => void; onDone: (s: Signing) => Promise<void> }) {
+function Sign({ draft, stop, artOf, onBack, onDone }: { draft: Draft; stop: StopInfo; artOf: (l: DraftLine) => MachineArtKind; onBack: () => void; onDone: (s: Signing) => Promise<void> }) {
   const pad = useRef<SignatureHandle>(null);
   const [name, setName] = useState("");
   const [ink, setInk] = useState(false);
@@ -553,7 +560,7 @@ function Sign({ draft, artOf, onBack, onDone }: { draft: Draft; artOf: (l: Draft
             type="button"
             className={btnYellow}
             disabled={!name.trim() || !ink || busy}
-            onClick={() => done(async () => ({ receiverName: name.trim(), image: await pad.current!.toShot([`ผู้รับ ${name.trim()}`, `${thaiLong(now.date)} ${now.time}  ${draft.projectRefCode}  ${fmt(total)} ลิตร`]) }))}
+            onClick={() => done(async () => ({ receiverName: name.trim(), image: await pad.current!.toShot([`ผู้รับ ${name.trim()}`, `${thaiLong(now.date)} ${now.time}  ${draft.projectRefCode}  ${fmt(total)} ลิตร`, siteName(stop.name, stop.code)]) }))}
           >
             {busy ? "กำลังบันทึก" : "ยืนยันรับน้ำมัน"}
           </button>
@@ -563,8 +570,13 @@ function Sign({ draft, artOf, onBack, onDone }: { draft: Draft; artOf: (l: Draft
         </>
       }
     >
-      <div className="flex items-baseline justify-between gap-[10px]">
-        <span className="font-display text-[26px] font-semibold leading-[1.2]">{draft.projectRefCode}</span>
+      {/* OBS-23: the person who signs must be able to read which site this is */}
+      <div className="flex flex-col gap-[2px]">
+        <span className="break-words font-display text-[24px] font-semibold leading-[1.25]">
+          {siteName(stop.name, stop.code)}
+          {siteName(stop.name, stop.code) !== stop.code && <span className="ml-[8px] whitespace-nowrap rounded-[8px] bg-page px-[7px] py-[1px] align-middle text-[15px] font-medium text-earth">{draft.projectRefCode}</span>}
+        </span>
+        {stop.detail && <span className="text-[15px] text-muted">{stop.detail}</span>}
         <span className="text-muted">{when}</span>
       </div>
       <table className="w-full border-collapse">

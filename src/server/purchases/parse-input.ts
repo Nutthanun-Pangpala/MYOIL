@@ -12,6 +12,8 @@ export type PurchaseInput = {
   amount: number | null;
   billNo: string;
   note: string;
+  /** why a saved bill is being changed (BA, 26 Nov 2026: a changed bill moves the money of the slips that drew on it); not used for a new bill */
+  reason: string;
   /** downsized bill photo as the browser sends it; the service checks the bytes */
   billPhoto: { mime: string; base64: string } | null;
   /** the person saw the "looks odd" questions and pressed save anyway (OBS-17) */
@@ -43,6 +45,7 @@ export function parsePurchaseInput(raw: unknown): PurchaseInput {
     amount: num(r.amount),
     billNo: str(r.billNo, 50),
     note: str(r.note, 300),
+    reason: str(r.reason, 300),
     billPhoto: photo(r.billPhoto),
     confirmed: r.confirmed === true,
   };

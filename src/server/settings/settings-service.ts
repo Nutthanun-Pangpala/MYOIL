@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gt, gte, ilike, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { machineKey } from "@/domain/issue-check";
-import { validateCycleDates, validateMachine, validateTank, validateUser, type TankErrors, type UserErrors } from "@/domain/settings-rules";
+import { projectRef, validateCycleDates, validateMachine, validateProject, validateTank, validateUser, type ProjectErrors, type TankErrors, type UserErrors } from "@/domain/settings-rules";
 import { cycleRanges, dayAfter, isCutDay } from "@/domain/cycle";
 import type { Session } from "@/lib/session";
 import { hashSecret } from "@/lib/password";
@@ -13,12 +13,12 @@ const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Ban
 
 export type Result<E = Record<string, string>> = { ok: true; message?: string } | { ok: false; message?: string; errors?: E };
 
-// ───────────── projects (read only: BookCare owns them) ─────────────
+// ───────────── projects: synced from BookCare AND added / changed here (test round 17, BUG-07; owner 26 Nov 2026) ─────────────
 
 export async function listProjects(q: string, status: "all" | "open" | "closed") {
   const term = q.trim();
   const rows = await db
-    .select({ id: projects.id, ref: projects.refCode, code: projects.projectCode, name: projects.name, active: projects.isActive })
+    .select({ id: projects.id, ref: projects.refCode, code: projects.projectCode, name: projects.name, active: projects.isActive, detail: projects.siteDetail, addedLocally: projects.addedLocally, localEditAt: projects.localEditAt })
     .from(projects)
     .where(
       and(
@@ -28,7 +28,47 @@ export async function listProjects(q: string, status: "all" | "open" | "closed")
     )
     .orderBy(asc(projects.refCode));
   const [{ n }] = await db.select({ n: count() }).from(projects);
-  return { rows, total: Number(n) };
+  // where each one comes from: BookCare's list, added here, or from BookCare and then changed here (MYOIL's values win)
+  const out = rows.map(({ addedLocally, localEditAt, ...r }) => ({ ...r, origin: (addedLocally ? "local" : localEditAt === null ? "bookcare" : "edited") as "local" | "bookcare" | "edited" }));
+  return { rows: out, total: Number(n) };
+}
+
+export type ProjectInput = { ref: string; name: string; code: string; /** where the site is, for the driver (OBS-23) */ detail: string };
+
+/** add (id null) or change a project. Slips, routes and invoices point at its id, so a changed code or name shows everywhere at once. */
+export async function saveProject(id: string | null, p: ProjectInput): Promise<Result<ProjectErrors>> {
+  const errors = validateProject(p);
+  const ref = projectRef(p.ref);
+  if (!errors.ref) {
+    const [dup] = await db.select({ id: projects.id, name: projects.name }).from(projects).where(and(eq(sql`upper(${projects.refCode})`, ref), id ? ne(projects.id, id) : undefined)).limit(1);
+    if (dup) errors.ref = `รหัส ${ref} มีโครงการ “${dup.name}” ใช้อยู่แล้ว`;
+  }
+  if (Object.keys(errors).length) return { ok: false, errors };
+  const core = { refCode: ref, name: p.name.trim().replace(/\s+/g, " "), projectCode: p.code.trim() || null };
+  const siteDetail = p.detail.trim().replace(/\s+/g, " ") || null;
+  try {
+    if (id) {
+      const [cur] = await db.select().from(projects).where(eq(projects.id, id)).limit(1);
+      if (!cur) return { ok: false, message: "ไม่พบโครงการนี้" };
+      // local_edit_at: from now on the BookCare sync leaves this project alone. The site detail is MYOIL's own field —
+      // typing only that does not take the code and name away from BookCare.
+      const touched = cur.refCode !== core.refCode || cur.name !== core.name || cur.projectCode !== core.projectCode;
+      await db.update(projects).set({ ...core, siteDetail, ...(touched ? { localEditAt: new Date() } : {}) }).where(eq(projects.id, id));
+    } else await db.insert(projects).values({ ...core, siteDetail, localEditAt: new Date(), isActive: true, addedLocally: true });
+  } catch (e) {
+    // two people adding the same code at once: the unique index is the last line of defence
+    const err = e as { code?: string; cause?: { code?: string } };
+    if (err?.code === "23505" || err?.cause?.code === "23505") return { ok: false, errors: { ref: `รหัส ${ref} มีโครงการอื่นใช้อยู่แล้ว` } };
+    throw e;
+  }
+  return { ok: true, message: id ? `บันทึกโครงการ ${ref} แล้ว` : `เพิ่มโครงการ ${ref} แล้ว` };
+}
+
+/** open or close a project. Closed = cannot be chosen for a new slip or route stop; its old slips and invoices stay. */
+export async function setProjectActive(id: string, active: boolean): Promise<Result> {
+  const [p] = await db.update(projects).set({ isActive: active, localEditAt: new Date() }).where(eq(projects.id, id)).returning({ ref: projects.refCode });
+  if (!p) return { ok: false, message: "ไม่พบโครงการนี้" };
+  return { ok: true, message: active ? `เปิดโครงการ ${p.ref} แล้ว` : `ปิดโครงการ ${p.ref} แล้ว` };
 }
 
 export async function allProjects() {

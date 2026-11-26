@@ -15,6 +15,8 @@ export const metadata = { title: "ซื้อน้ำมันเข้า" };
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v) ?? "";
+/** OBS-38: "จัดการ" stays at the right edge while the table scrolls sideways, with a soft shadow that says there is more */
+const STICKY = "sticky right-0 bg-card shadow-[-10px_0_10px_-10px_rgb(33_26_21/0.25)]";
 
 export default async function PurchasesPage({ searchParams }: { searchParams: SP }) {
   const session = await requireUser();
@@ -63,6 +65,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                 <StateBox title="ยังไม่มีการซื้อในเดือนนี้">{writer ? "กดบันทึกการซื้อเมื่อรถเติมน้ำมันเติมเข้า" : "การซื้อที่สโตร์กลางบันทึกจะขึ้นที่นี่"}</StateBox>
               ) : (
                 <div className="overflow-x-auto">
+                  <p className="pb-1 text-[13px] text-muted md:hidden">เลื่อนตารางไปทางซ้ายเพื่อดูจำนวนเงิน เลขที่บิล และหมายเหตุ</p>
                   <table className="t">
                     <thead>
                       <tr>
@@ -72,7 +75,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                         <th className="n">จำนวนเงิน (บาท)</th>
                         <th>เลขที่บิล</th>
                         <th>หมายเหตุ</th>
-                        {writer && <th>จัดการ</th>}
+                        {writer && <th className={STICKY}>จัดการ</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -80,7 +83,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                         <tr key={p.id} className={p.cancelled ? "text-muted line-through" : undefined}>
                           <td className="whitespace-nowrap">
                             {thaiShort(p.date)}
-                            {p.time && <span className="ml-1.5 text-muted">{p.time} น.</span>}
+                            <span className="ml-1.5 text-muted no-underline">{p.time ? `${p.time} น.` : "ไม่มีเวลา"}</span>
                           </td>
                           <td className="n">{formatBaht(p.liters)}</td>
                           <td className="n">{formatBaht(p.pricePerLiter)}</td>
@@ -112,8 +115,8 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                             )}
                           </td>
                           {writer && (
-                            <td className="no-underline">
-                              <PurchaseRowActions id={p.id} month={month} cancelled={p.cancelled} lock={p.lock} pendingConfirm={p.pendingConfirm} />
+                            <td className={`no-underline ${STICKY}`}>
+                              <PurchaseRowActions id={p.id} month={month} cancelled={p.cancelled} lock={p.lock} pendingConfirm={p.pendingConfirm} label={`${thaiShort(p.date)} · ${formatBaht(p.liters)} ลิตร`} />
                             </td>
                           )}
                         </tr>
@@ -127,7 +130,7 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
                         <td className="n">{formatBaht(totalAmount)}</td>
                         <td />
                         <td />
-                        {writer && <td />}
+                        {writer && <td className={STICKY} />}
                       </tr>
                     </tfoot>
                   </table>
@@ -136,11 +139,12 @@ export default async function PurchasesPage({ searchParams }: { searchParams: SP
             </div>
           </Card>
 
-          <p className="text-[14px] text-muted">
-            ใบจ่ายใช้น้ำมันของบิลที่เข้าก่อนให้หมดก่อน แล้วจึงใช้บิลถัดไป เรียงตามวันที่และเวลาบนบิล ถ้าไม่มีบิลใหม่ ราคาของบิลเดิมใช้ต่อไปจนน้ำมันของบิลนั้นหมด
-            ใบจ่ายที่คร่อมสองบิลจะแยกเป็นสองราคา เลือกบิลเองไม่ได้ ถ้าลำดับผิดให้แก้ลิตร วันที่ หรือเวลาที่ต้นทาง เมื่อเพิ่ม แก้ หรือยกเลิกบิล
-            ระบบคิดเงินใบจ่ายในรอบที่ยังไม่ปิดใหม่ และบอกก่อนบันทึกว่ามีกี่ใบที่ยอดเงินเปลี่ยน รอบที่ปิดแล้วไม่เปลี่ยน
-          </p>
+          {/* OBS-44: the price rule in three short lines, not a grey paragraph */}
+          <ul aria-label="วิธีคิดราคาใบจ่าย" className="flex list-decimal flex-col gap-1 pl-5 text-[15px]">
+            <li>น้ำมันของบิลที่เข้าก่อนถูกใช้ก่อน เรียงตามวันที่และเวลาบนบิล</li>
+            <li>ใบจ่ายที่คร่อมสองบิลแยกเป็นสองราคา เลือกบิลเองไม่ได้</li>
+            <li>เพิ่ม แก้ หรือยกเลิกบิล ระบบบอกก่อนว่ามีกี่ใบที่ยอดเงินเปลี่ยน รอบที่ปิดแล้วไม่เปลี่ยน</li>
+          </ul>
         </div>
 
         {editing ? (

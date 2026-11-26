@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateCycleDates, validateMachine, validateTank, validateUser } from "./settings-rules";
+import { validateCycleDates, validateMachine, projectRef, validateProject, validateTank, validateUser } from "./settings-rules";
 
 const prev = { start: "2026-10-01", end: "2026-10-31" };
 const next = { start: "2027-01-01", end: "2027-01-31" };
@@ -68,5 +68,33 @@ describe("validateMachine", () => {
   it("refuses a code longer than 60 characters instead of cutting it (BUG-06)", () => {
     expect(validateMachine({ code: "A".repeat(60) })).toEqual({});
     expect(validateMachine({ code: "A".repeat(61) }).code).toContain("ไม่เกิน 60 ตัวอักษร");
+  });
+});
+
+describe("validateProject (MYOIL's own project list)", () => {
+  const ok = { ref: "PNKK", name: "โครงการพีเอ็นเคเค", code: "" };
+  it("accepts a ref of capitals, digits and dashes, with or without an accounting code", () => {
+    expect(validateProject(ok)).toEqual({});
+    expect(validateProject({ ...ok, ref: "y2-rk", code: "PSY69" })).toEqual({});
+  });
+  it("stores the ref in capitals without spaces", () => {
+    expect(projectRef(" pn kk ")).toBe("PNKK");
+  });
+  it("needs a ref and a name", () => {
+    expect(validateProject({ ref: " ", name: "", code: "" })).toEqual({ ref: expect.any(String), name: expect.any(String) });
+  });
+  it("refuses a ref that is too short, too long or has other characters", () => {
+    expect(validateProject({ ...ok, ref: "A" }).ref).toBeDefined();
+    expect(validateProject({ ...ok, ref: "ABCDEFGHIJKLM" }).ref).toBeDefined();
+    expect(validateProject({ ...ok, ref: "โครงการ1" }).ref).toBeDefined();
+    expect(validateProject({ ...ok, ref: "AB/1" }).ref).toBeDefined();
+  });
+  it("site detail is optional and at most 200 characters (OBS-23)", () => {
+    expect(validateProject({ ...ok, detail: "ซอยลำลูกกา 11 ตรงข้ามปั๊ม ปตท." })).toEqual({});
+    expect(validateProject({ ...ok, detail: "ก".repeat(201) }).detail).toBeDefined();
+  });
+  it("refuses a name or accounting code that is too long", () => {
+    expect(validateProject({ ...ok, name: "ก".repeat(151) }).name).toBeDefined();
+    expect(validateProject({ ...ok, code: "9".repeat(31) }).code).toBeDefined();
   });
 });

@@ -1,5 +1,6 @@
-import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { countsSql } from "@/server/issues/billable";
 import { sumAmounts, sumLiters } from "@/domain/money";
 import type { Session } from "@/lib/session";
 import { visibleProjectIds } from "@/server/projects/project-scope";
@@ -55,7 +56,7 @@ export async function loadMachineReport(session: Session, f: { from: string; to:
     .leftJoin(fuelIssueLinePhotos, eq(fuelIssueLinePhotos.lineId, fuelIssueLines.id))
     .where(
       and(
-        isNull(fuelIssues.cancelledAt),
+        countsSql,
         gte(fuelIssues.issueDate, f.from),
         lte(fuelIssues.issueDate, f.to),
         f.projectId ? eq(fuelIssues.projectId, f.projectId) : scope ? inArray(fuelIssues.projectId, scope) : undefined,

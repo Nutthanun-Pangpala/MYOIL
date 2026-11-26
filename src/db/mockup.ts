@@ -53,6 +53,7 @@ async function main() {
     const r = await createPurchase(session, {
       date: daysAgo(ago),
       time: "08:00",
+      reason: "",
       liters: 6000 + Math.round(rnd() * 4) * 500,
       price: prices[n++ % prices.length],
       amount: null,
@@ -60,7 +61,7 @@ async function main() {
       note: n === 3 ? "ซื้อเพิ่มก่อนวันหยุดยาว" : "",
       billPhoto: null,
       confirmed: true,
-    });
+    }, { photoOptional: true });
     if (!r.ok) console.warn("purchase", daysAgo(ago), r.error);
   }
 

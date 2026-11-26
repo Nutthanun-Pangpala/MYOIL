@@ -84,7 +84,7 @@ export async function loadIssueContext(input: IssueInput, excludeId?: string): P
     };
   }
 
-  return { duplicateIssueId, closedCycleLabel, history };
+  return { duplicateIssueId, closedCycleLabel, history, today: new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" }) };
 }
 
 /** What the form shows while typing: the checks plus the price that would be used. */

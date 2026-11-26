@@ -87,6 +87,10 @@ export async function markChecked(session: Session, id: string): Promise<ChangeR
   if (cur.head.source !== "mobile") return { ok: false, message: "ใบนี้คีย์จากกระดาษ ไม่ต้องตรวจ" };
   if (cur.lock) return { ok: false, message: cur.lock };
   if (cur.head.reviewStatus === "checked") return { ok: true };
+  // BA, 26 Nov 2026: a slip dated after the day it arrived counts nowhere until its date is put right — so it cannot be passed either
+  if (withDateFlags([], cur.head.issueDate, cur.head.receivedAt?.toISOString() ?? null).includes("dated_ahead")) {
+    return { ok: false, message: "ใบนี้ลงวันที่ล่วงหน้า (หลังวันที่ส่งถึง MYOIL) กด “แก้ไข” แล้วแก้วันที่ให้ถูกก่อน จึงกดตรวจแล้วได้" };
+  }
   const held = await db
     .select({ id: machines.id })
     .from(fuelIssueLines)

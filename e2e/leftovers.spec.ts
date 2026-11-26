@@ -33,7 +33,8 @@ test("a bill photo can be attached and opened", async ({ page }) => {
   await expect(form.getByText("แนบแล้ว: bill.png")).toBeVisible();
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(page).toHaveURL(/\/purchases\?month=2026-03$/);
-  const link = page.getByRole("link", { name: "ดูรูปบิล" });
+  // (the bill of 02/03 recorded above has a photo too: every new bill carries one)
+  const link = page.getByRole("row").filter({ hasText: "03/03/69" }).getByRole("link", { name: "ดูรูปบิล" });
   await expect(link).toHaveCount(1);
   const res = await page.request.get((await link.getAttribute("href"))!);
   expect(res.status()).toBe(200);

@@ -28,7 +28,7 @@ export default async function DriverHome() {
   const liters = await litersOfIssues(stops.flatMap((x) => (x.issueId ? [x.issueId] : [])));
   const filled = stops.filter((x) => x.status === "filled");
   const filledLiters = filled.reduce((a, x) => a + (liters.get(x.issueId!) ?? 0), 0);
-  const home: HomeStop[] = stops.map((x) => ({ id: x.id, position: x.position, code: x.projectRefCode, name: x.projectName, note: x.note, status: x.status, issueId: x.issueId, skipReason: x.skipReason, liters: x.issueId ? (liters.get(x.issueId) ?? null) : null }));
+  const home: HomeStop[] = stops.map((x) => ({ id: x.id, position: x.position, code: x.projectRefCode, name: x.projectName, detail: x.projectDetail, note: x.note, status: x.status, issueId: x.issueId, skipReason: x.skipReason, liters: x.issueId ? (liters.get(x.issueId) ?? null) : null }));
   const inTruck = Number(tank.liters);
   const capacity = tank.capacity == null ? null : Number(tank.capacity);
 

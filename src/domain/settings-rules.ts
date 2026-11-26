@@ -65,3 +65,29 @@ export function validateMachine(m: { code: string }): { code?: string } {
   if (code.length > MACHINE_CODE_MAX) return { code: `รหัสหรือทะเบียนยาวได้ไม่เกิน ${MACHINE_CODE_MAX} ตัวอักษร (ตอนนี้ ${code.length} ตัว)` };
   return {};
 }
+
+// ───────────── projects (MYOIL keeps its own list since it was split from BookCare, 25 Nov 2026) ─────────────
+
+export type ProjectErrors = { ref?: string; name?: string; code?: string; detail?: string };
+export const PROJECT_DETAIL_MAX = 200;
+export const PROJECT_REF_MAX = 12;
+export const PROJECT_NAME_MAX = 150;
+export const PROJECT_CODE_MAX = 30;
+
+/** how a project ref is stored: no spaces, capitals ("pnkk " → "PNKK") */
+export const projectRef = (raw: string) => raw.trim().replace(/\s+/g, "").toUpperCase();
+
+export function validateProject(p: { ref: string; name: string; code: string; detail?: string }): ProjectErrors {
+  const e: ProjectErrors = {};
+  const ref = projectRef(p.ref);
+  if (!ref) e.ref = "ใส่รหัสโครงการ เช่น PNKK";
+  else if (ref.length < 2 || ref.length > PROJECT_REF_MAX) e.ref = `รหัสโครงการยาว 2 ถึง ${PROJECT_REF_MAX} ตัว (ตอนนี้ ${ref.length} ตัว)`;
+  else if (!/^[A-Z0-9-]+$/.test(ref)) e.ref = "รหัสโครงการใช้ได้เฉพาะ A–Z ตัวเลข และขีดกลาง";
+  const name = p.name.trim();
+  if (!name) e.name = "ใส่ชื่อโครงการ";
+  else if (name.length > PROJECT_NAME_MAX) e.name = `ชื่อโครงการยาวได้ไม่เกิน ${PROJECT_NAME_MAX} ตัวอักษร (ตอนนี้ ${name.length} ตัว)`;
+  if (p.code.trim().length > PROJECT_CODE_MAX) e.code = `รหัสบัญชียาวได้ไม่เกิน ${PROJECT_CODE_MAX} ตัวอักษร`;
+  const detail = (p.detail ?? "").trim();
+  if (detail.length > PROJECT_DETAIL_MAX) e.detail = `รายละเอียดไซต์ยาวได้ไม่เกิน ${PROJECT_DETAIL_MAX} ตัวอักษร (ตอนนี้ ${detail.length} ตัว)`;
+  return e;
+}

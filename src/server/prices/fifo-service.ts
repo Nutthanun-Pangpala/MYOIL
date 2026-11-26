@@ -1,5 +1,6 @@
 import { asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { countsSql } from "../issues/billable";
 import { allocateFifo, partsAmount, partsPrice, stockValue, type FifoLine, type Lot, type Part } from "@/domain/fifo";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -27,6 +28,9 @@ async function loadLots(q: Db): Promise<Lot[]> {
   return lots;
 }
 
+/** stands for the slip being typed in previewSlip: it is in no table */
+const PREVIEW = "preview";
+
 type LineRow = { lineId: string; issueId: string; liters: number; price: number | null; amount: number | null; closed: boolean; at: string };
 
 /** every line of every live slip, in the order the fuel left: date, time (a paper slip with no time goes last that day, B9), then as keyed */
@@ -48,7 +52,7 @@ async function loadLines(q: Db): Promise<LineRow[]> {
     .from(fuelIssueLines)
     .innerJoin(fuelIssues, eq(fuelIssues.id, fuelIssueLines.issueId))
     .leftJoin(claimCycles, eq(claimCycles.id, fuelIssues.claimCycleId))
-    .where(isNull(fuelIssues.cancelledAt));
+    .where(countsSql); // a phone slip dated ahead waits outside the queue until its date is put right
   return rows
     .map((r) => ({
       lineId: r.lineId,
@@ -80,7 +84,8 @@ const same = (a: Part[] | undefined, b: Part[]) => !!a && a.length === b.length 
 async function compute(q: Db, edit?: (lines: LineRow[]) => LineRow[]) {
   const [lots, all] = await Promise.all([loadLots(q), loadLines(q)]);
   const lines = edit ? edit(all) : all;
-  const had = await loadParts(q, lines.map((l) => l.lineId));
+  // only saved lines have stored parts: the lines of a slip still being typed (previewSlip) have made-up ids, not uuids
+  const had = await loadParts(q, lines.filter((l) => l.issueId !== PREVIEW).map((l) => l.lineId));
   const input: FifoLine[] = lines.map((l) => ({ id: l.lineId, at: l.at, liters: l.liters, frozen: l.closed ? had.get(l.lineId) : undefined }));
   const { parts, left } = allocateFifo(lots, input);
   return { lines, had, parts, left };
@@ -148,7 +153,7 @@ export async function previewSlip(slip: { date: string; time: string | null; lit
   const ids = slip.liters.map((_, i) => `new-${i}`);
   const { parts } = await compute(db, (all) => {
     const rest = all.filter((l) => l.issueId !== slip.excludeIssueId);
-    const mine: LineRow[] = slip.liters.map((liters, i) => ({ lineId: ids[i], issueId: "new", liters, price: null, amount: null, closed: false, at }));
+    const mine: LineRow[] = slip.liters.map((liters, i) => ({ lineId: ids[i], issueId: PREVIEW, liters, price: null, amount: null, closed: false, at }));
     const i = rest.findIndex((l) => l.at > at);
     return i < 0 ? [...rest, ...mine] : [...rest.slice(0, i), ...mine, ...rest.slice(i)];
   });

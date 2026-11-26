@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { keyIssue, login, resetData } from "./helpers";
+import { attachBill, keyIssue, login, resetData } from "./helpers";
 
 // 1×1 PNG: the browser really decodes it, then re-encodes it as a small JPEG
 const TINY_PNG = Buffer.from(
@@ -17,6 +17,17 @@ test("keying a slip for today uses the seeded price of 32.50", async ({ page }) 
   await expect(page.getByText("3,250.00").first()).toBeVisible();
   await page.goto("/issues");
   await expect(page.getByRole("row").filter({ hasText: "PC210" })).toContainText("3,250.00");
+});
+
+test("the form shows what the liters will cost while typing, before saving (price by bill)", async ({ page }) => {
+  await login(page, "store");
+  await page.goto("/issues/new");
+  await page.getByLabel(/^วันที่/).fill(TODAY);
+  await page.getByLabel("รายการหรือรหัสเครื่องจักร").first().fill("PC210");
+  await page.getByLabel("จำนวนน้ำมัน (ลิตร)").first().fill("200");
+  // 200 liters from the seed's bill at 32.50 (the server cuts the typed liters into bills; nothing is saved)
+  await expect(page.getByTestId("slip-prices")).toContainText("32.50 บาท/ลิตร");
+  await expect(page.getByRole("region", { name: "ยอดของใบนี้" })).toContainText("6,500.00 บาท");
 });
 
 test("the same book and number cannot be keyed twice", async ({ page }) => {
@@ -61,6 +72,7 @@ test("a slip with no purchase bill before it waits, and is priced when the bill 
   // (oldest fuel first — a bigger bill dated in January would be used by today's slips too, and ask first)
   await form.getByLabel("เติมเข้า (ลิตร)").fill("100");
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
+  await attachBill(form);
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(form.getByRole("status")).toContainText("ตั้งราคาให้ใบจ่ายที่รอราคาแล้ว 1 รายการ");
 

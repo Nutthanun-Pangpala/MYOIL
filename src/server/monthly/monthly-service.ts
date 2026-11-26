@@ -1,5 +1,6 @@
-import { and, asc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { countsSql } from "@/server/issues/billable";
 import { monthRange } from "@/domain/iso-date";
 import { byMachine, byProject, type MonthlyLine } from "@/domain/monthly-matrix";
 import type { Session } from "@/lib/session";
@@ -28,7 +29,7 @@ async function monthLines(session: Session, month: string): Promise<MonthlyLine[
     .innerJoin(schema.machines, eq(schema.machines.id, schema.fuelIssueLines.machineId))
     .where(
       and(
-        isNull(schema.fuelIssues.cancelledAt),
+        countsSql,
         gte(schema.fuelIssues.issueDate, start),
         lte(schema.fuelIssues.issueDate, end),
         ids ? inArray(schema.fuelIssues.projectId, ids) : undefined,

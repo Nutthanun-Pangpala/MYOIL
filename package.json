@@ -16,6 +16,8 @@
     "db:mockup": "npm run db:seed && tsx --env-file=.env src/db/mockup.ts",
     "setup": "docker compose up -d && sleep 3 && drizzle-kit push --force && npm run db:seed",
     "test": "vitest run",
+    "check": "bash scripts/check-all.sh",
+    "check:all": "bash scripts/check-all.sh all",
     "test:e2e": "playwright test",
     "test:e2e:issues": "playwright test e2e/issues.spec.ts",
     "test:e2e:invoices": "playwright test e2e/invoices.spec.ts",

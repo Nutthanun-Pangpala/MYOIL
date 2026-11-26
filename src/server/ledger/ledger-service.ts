@@ -1,5 +1,6 @@
 import { and, eq, gte, isNull, lte, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { countsSql } from "@/server/issues/billable";
 import { addDays, monthRange } from "@/domain/iso-date";
 import { ledgerRows, ledgerSummary, type LedgerRow } from "@/domain/ledger-rows";
 import { sumLiters } from "@/domain/money";
@@ -32,7 +33,7 @@ async function issuesByDay(from: string, to: string) {
     .select({ date: schema.fuelIssues.issueDate, liters: sql<number>`sum(${schema.fuelIssueLines.liters})::float8` })
     .from(schema.fuelIssueLines)
     .innerJoin(schema.fuelIssues, eq(schema.fuelIssues.id, schema.fuelIssueLines.issueId))
-    .where(and(isNull(schema.fuelIssues.cancelledAt), gte(schema.fuelIssues.issueDate, from), lte(schema.fuelIssues.issueDate, to)))
+    .where(and(countsSql, gte(schema.fuelIssues.issueDate, from), lte(schema.fuelIssues.issueDate, to)))
     .groupBy(schema.fuelIssues.issueDate);
 }
 
@@ -126,7 +127,7 @@ export async function stockOn(date: string): Promise<{ liters: number; percent: 
     .select({ l: sql<number>`coalesce(sum(${schema.fuelIssueLines.liters}), 0)::float8` })
     .from(schema.fuelIssueLines)
     .innerJoin(schema.fuelIssues, eq(schema.fuelIssues.id, schema.fuelIssueLines.issueId))
-    .where(and(isNull(schema.fuelIssues.cancelledAt), gte(schema.fuelIssues.issueDate, from), lte(schema.fuelIssues.issueDate, date)));
+    .where(and(countsSql, gte(schema.fuelIssues.issueDate, from), lte(schema.fuelIssues.issueDate, date)));
   const liters = sumLiters([cfg.openingLiters, p?.l ?? 0, -(i?.l ?? 0)]);
   return { liters, percent: cfg.capacity ? (liters / cfg.capacity) * 100 : null };
 }
