@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { appBookNo, appDocNo, purchaseFlags, type IssueRequest, type PurchaseRequest, type SignatureRequest } from "@/domain/bookcare-api";
 import { dayAfter } from "@/domain/cycle";
@@ -116,6 +116,8 @@ export async function receiveIssue(req: IssueRequest): Promise<Done<IssueAnswer>
             [m] = await tx.select({ id: machines.id, pendingReview: machines.pendingReview }).from(machines).where(eq(machines.key, key)).limit(1);
           }
         }
+        // a deleted machine named on a new slip is back in the list
+        await tx.update(machines).set({ deletedAt: null }).where(and(eq(machines.id, m.id), isNotNull(machines.deletedAt)));
         if (m.pendingReview) flags.push(`new_machine:${l.position}`);
         machineIds.push(m.id);
       }

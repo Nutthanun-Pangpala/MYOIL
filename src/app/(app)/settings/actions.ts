@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdministrator } from "@/lib/session";
 import { createDriver, resetDriverPin, setDriverActive, updateDriver } from "@/server/settings/driver-service";
-import { createUser, resetPassword, saveCutDay, saveMachine, saveProject, saveTank, setProjectActive, setUserActive, updateCycleDates, updateUser } from "@/server/settings/settings-service";
+import { createUser, resetPassword, saveCutDay, saveMachine, deleteMachine, machineUse, saveProject, saveTank, setProjectActive, setUserActive, updateCycleDates, updateUser } from "@/server/settings/settings-service";
 
 const isId = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
 const s = (v: unknown, max = 200) => (typeof v === "string" ? v.slice(0, max) : "");
@@ -39,6 +39,20 @@ export async function setProjectActiveAction(id: string, active: boolean) {
   await requireAdministrator();
   if (!isId(id)) return bad;
   return projectsChanged(await setProjectActive(id, active === true));
+}
+
+/** before the confirm window: how many slips name this machine (decides what "ลบ" will do) */
+export async function machineUseAction(id: string) {
+  await requireAdministrator();
+  return isId(id) ? machineUse(id) : null;
+}
+
+export async function deleteMachineAction(id: string) {
+  await requireAdministrator();
+  if (!isId(id)) return bad;
+  const r = await deleteMachine(id);
+  if (r.ok) revalidatePath("/", "layout"); // the slip form and the phone list machines too
+  return r;
 }
 
 export async function createUserAction(raw: unknown) {

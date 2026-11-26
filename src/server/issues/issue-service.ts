@@ -117,7 +117,9 @@ async function resolveMachines(tx: Tx, codes: string[]): Promise<Map<string, str
     if (out.has(key)) continue;
     const code = raw.trim().replace(/\s+/g, " ");
     await tx.insert(machines).values({ code, key }).onConflictDoNothing({ target: machines.key });
-    const [m] = await tx.select({ id: machines.id }).from(machines).where(eq(machines.key, key)).limit(1);
+    const [m] = await tx.select({ id: machines.id, deletedAt: machines.deletedAt }).from(machines).where(eq(machines.key, key)).limit(1);
+    // a deleted machine typed on a slip again is back in the list
+    if (m.deletedAt) await tx.update(machines).set({ deletedAt: null }).where(eq(machines.id, m.id));
     out.set(key, m.id);
   }
   return out;
@@ -402,7 +404,7 @@ export async function projectOptions(session: Session) {
 }
 
 export async function machineOptions() {
-  return db.select({ code: machines.code }).from(machines).orderBy(asc(machines.code));
+  return db.select({ code: machines.code }).from(machines).where(isNull(machines.deletedAt)).orderBy(asc(machines.code));
 }
 
 /** "วันนี้คีย์แล้ว n ใบ" on the new-slip form: slips this person keyed since midnight (Bangkok) */
