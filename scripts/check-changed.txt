@@ -1,0 +1,13 @@
+# The spec files that cover what was changed since the last green run. `npm run check` runs only these.
+# The developer rewrites this list with every round of changes; `npm run check:all` runs every spec.
+# 26 Nov 2026: site name + address on the driver's phone (OBS-23); purchase form (photo needed, reason on edit, live amount), FIFO preview, projects page, no future dates
+e2e/purchases.spec.ts
+e2e/leftovers.spec.ts
+e2e/ba-rulings.spec.ts
+e2e/issues.spec.ts
+e2e/settings.spec.ts
+e2e/overview.spec.ts
+e2e/mobile-review.spec.ts
+e2e/driver.spec.ts
+e2e/driver-fill.spec.ts
+e2e/routes.spec.ts

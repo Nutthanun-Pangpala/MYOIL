@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { keyIssue, login, recordPurchase, resetData } from "./helpers";
+import { attachBill, keyIssue, login, recordPurchase, resetData } from "./helpers";
 
 // BA rulings of 22 Nov (sheet "MYOIL: คำตัดสิน BA จากผลทดสอบ"): OBS-13, OBS-17, OBS-18
 
@@ -17,6 +17,7 @@ test("OBS-17: a purchase that looks odd is asked about, not refused", async ({ p
   await form.getByLabel("วันที่").fill("2026-04-05");
   await form.getByLabel("เติมเข้า (ลิตร)").fill("50");
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
+  await attachBill(form);
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(form.getByText("ซื้อน้อยกว่า 100 ลิตร")).toBeVisible();
   await form.getByRole("button", { name: "ยืนยันบันทึก" }).click();
@@ -30,6 +31,7 @@ test("OBS-18: a saved purchase can be edited, cancelled with a reason, and resto
   await form.getByLabel("วันที่").fill("2026-04-10");
   await form.getByLabel("เติมเข้า (ลิตร)").fill("1000");
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
+  await attachBill(form);
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(page).toHaveURL(/\/purchases\?month=2026-04$/);
 
@@ -37,6 +39,10 @@ test("OBS-18: a saved purchase can be edited, cancelled with a reason, and resto
   await row().getByRole("link", { name: "แก้ไข" }).click();
   const edit = page.getByRole("form", { name: "แก้ไขการซื้อ" });
   await edit.getByLabel("เติมเข้า (ลิตร)").fill("1200");
+  // OBS-05 (BA, 26 Nov 2026): a changed bill needs a reason
+  await edit.getByRole("button", { name: "บันทึก", exact: true }).click();
+  await expect(edit.getByText("ใส่เหตุผลที่แก้ไขรายการซื้อ")).toBeVisible();
+  await edit.getByLabel("เหตุผลที่แก้ไข").fill("คีย์ลิตรผิดจากบิล");
   await edit.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(page).toHaveURL(/\/purchases\?month=2026-04$/);
   await expect(row()).toContainText("48,000.00");

@@ -40,6 +40,9 @@ test("a fill at the next stop: photo, liters, signature → sent, and the office
   await loginDriver(page);
   await page.getByRole("link", { name: "เริ่มเติมที่จุดถัดไป" }).click();
   await expect(page.getByTestId("stop-code")).toHaveText("DEMO1");
+  // OBS-23: the site's name is the big line, with where it is; the code is only a tag
+  await expect(page.getByTestId("stop-name")).toHaveText("ตัวอย่าง 1");
+  await expect(page.getByText("ซอยลำลูกกา 11 ตรงข้ามปั๊ม ปตท.")).toBeVisible();
   await page.getByRole("button", { name: "เริ่มเติมที่จุดนี้" }).click();
   await expect(page.getByRole("button", { name: "เติมครบแล้ว ไปเซ็นรับ" })).toBeDisabled();
 

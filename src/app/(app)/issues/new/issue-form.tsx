@@ -71,6 +71,12 @@ export function IssueForm({
     return projects.find((p) => projectLabel(p).toLowerCase() === t || p.refCode.toLowerCase() === t)?.id ?? null;
   }, [projectText, projects]);
 
+  // nothing in the list even contains what was typed (while a match is still possible, nothing is said)
+  const projectUnknown = useMemo(() => {
+    const t = projectText.trim().toLowerCase();
+    return t !== "" && !projectId && !projects.some((p) => projectLabel(p).toLowerCase().includes(t));
+  }, [projectText, projectId, projects]);
+
   const input: IssueInput = useMemo(
     () => ({
       bookNo,
@@ -91,9 +97,11 @@ export function IssueForm({
   // ── live checks from the server (duplicates, closed cycle, history) merged over the instant local rules ──
   // `input` = what the answer was asked about: an answer for older input is never shown or used (BUG-04)
   const [server, setServer] = useState<{ check: IssueCheck; price: number | null; amount: number | null; split: { price: number | null; liters: number }[]; duplicateIssueId: string | null; input: IssueInput } | null>(null);
+  // no slip is dated after today (BA, 26 Nov 2026): the picker stops at today and the rule says why
+  const today = useMemo(() => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" }), []);
   const local = useMemo(
-    () => checkIssue(input, { duplicateIssueId: null, closedCycleLabel: null, history: {} }),
-    [input],
+    () => checkIssue(input, { duplicateIssueId: null, closedCycleLabel: null, history: {}, today }),
+    [input, today],
   );
   useEffect(() => {
     const t = setTimeout(() => {
@@ -140,6 +148,7 @@ export function IssueForm({
 
   // ── save ──
   const [saveError, setSaveError] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   /** B5: other slips would get another amount — shown first, saved only after "ยืนยันบันทึก" */
   const [ask, setAsk] = useState<string[] | null>(null);
   const askMode = useRef<"done" | "next">("done");
@@ -151,7 +160,15 @@ export function IssueForm({
     setAsk(null);
     askMode.current = mode;
     // the instant rules decide whether to send; the server re-checks everything and answers with its own errors
-    if (!local.ok) return;
+    if (!local.ok) {
+      // OBS-47: go to the first box that is wrong instead of leaving the cursor on the button
+      requestAnimationFrame(() => {
+        const first = formRef.current?.querySelector<HTMLElement>("input.border-repair, select.border-repair, textarea.border-repair");
+        first?.scrollIntoView({ block: "center", behavior: "smooth" });
+        first?.focus({ preventScroll: true });
+      });
+      return;
+    }
     startSaving(async () => {
       try {
         if (edit) {
@@ -215,6 +232,7 @@ export function IssueForm({
 
   return (
     <form
+      ref={formRef}
       className="flex flex-col gap-6"
       onSubmit={(e) => e.preventDefault()}
       onKeyDown={(e) => {
@@ -291,6 +309,7 @@ export function IssueForm({
                   <input
                     id="n-date"
                     type="date"
+                    max={today}
                     className={`${field} ${showErr("date", check.errors.date) ? bad : ""}`}
                     value={issueDate}
                     onChange={(e) => setIssueDate(e.target.value)}
@@ -316,7 +335,18 @@ export function IssueForm({
                       <option key={p.id} value={projectLabel(p)} />
                     ))}
                   </datalist>
-                  <Err msg={showErr("project", check.errors.project)} />
+                  {/* OBS-47: said while typing, not only after "บันทึก" */}
+                  {projects.length === 0 ? (
+                    <span role="alert" className="text-sm text-repair">
+                      ยังไม่มีโครงการที่เปิดอยู่ ให้ผู้ดูแลระบบเพิ่มหรือเปิดโครงการที่ ตั้งค่า › โครงการ ก่อน
+                    </span>
+                  ) : projectUnknown ? (
+                    <span role="alert" data-testid="project-unknown" className="text-sm text-repair">
+                      ไม่พบโครงการ “{projectText.trim().slice(0, 40)}” เลือกจากรายการที่ขึ้นขณะพิมพ์ ถ้าเป็นโครงการใหม่ ให้ผู้ดูแลระบบเพิ่มที่ ตั้งค่า › โครงการ
+                    </span>
+                  ) : (
+                    <Err msg={showErr("project", check.errors.project)} />
+                  )}
                 </div>
                 <div className="flex min-w-0 flex-[1_1_110px] flex-col gap-1.5">
                   <Lbl htmlFor="n-in" optional>

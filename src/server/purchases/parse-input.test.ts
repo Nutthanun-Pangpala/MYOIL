@@ -13,6 +13,7 @@ describe("parsePurchaseInput", () => {
       billPhoto: null,
       confirmed: false,
       note: "",
+      reason: "",
     });
   });
   it("keeps good values and drops wrong types, impossible dates, NaN", () => {

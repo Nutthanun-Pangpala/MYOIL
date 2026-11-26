@@ -8,6 +8,9 @@ export type DriverSlip = {
   ref: string;
   no: string;
   code: string;
+  /** the site's full name and where it is (OBS-23) */
+  name: string;
+  detail: string | null;
   date: string;
   timeIn: string | null;
   timeOut: string | null;
@@ -21,7 +24,7 @@ export type DriverSlip = {
 /** a slip made on the phone, as the driver's own "ใบจ่ายของ …" page shows it (paper slips are the office's) */
 export async function driverSlip(id: string): Promise<DriverSlip | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
-  const [h] = await db.select({ i: fuelIssues, code: projects.refCode }).from(fuelIssues).innerJoin(projects, eq(projects.id, fuelIssues.projectId)).where(eq(fuelIssues.id, id)).limit(1);
+  const [h] = await db.select({ i: fuelIssues, code: projects.refCode, name: projects.name, detail: projects.siteDetail }).from(fuelIssues).innerJoin(projects, eq(projects.id, fuelIssues.projectId)).where(eq(fuelIssues.id, id)).limit(1);
   if (!h || h.i.source !== "mobile" || !h.i.externalRef) return null;
   const lines = await db
     .select({ id: fuelIssueLines.id, machine: machines.code, type: machines.type, liters: fuelIssueLines.liters })
@@ -34,6 +37,8 @@ export async function driverSlip(id: string): Promise<DriverSlip | null> {
     ref: h.i.externalRef,
     no: `${h.i.bookNo}/${h.i.docNo}`,
     code: h.code,
+    name: h.name,
+    detail: h.detail,
     date: h.i.issueDate,
     timeIn: h.i.timeIn,
     timeOut: h.i.timeOut,

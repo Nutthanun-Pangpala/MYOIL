@@ -18,7 +18,7 @@ test("only the system admin opens settings; others see a clear no-access page", 
   await expect(page.getByRole("button", { name: "เพิ่มผู้ใช้" })).toHaveCount(0);
 });
 
-test("projects are read-only and searchable", async ({ page }) => {
+test("projects: search, add, a code already used is refused, rename, close and open again (BUG-07)", async ({ page }) => {
   await login(page, "admin");
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings\/projects/);
@@ -26,7 +26,49 @@ test("projects are read-only and searchable", async ({ page }) => {
   await page.getByLabel("ค้นหาโครงการ").fill("DEMO1");
   await expect(page.getByRole("row").filter({ hasText: "DEMO1" })).toBeVisible();
   await expect(page.getByRole("row").filter({ hasText: "DEMO2" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /เพิ่ม|แก้ไข/ })).toHaveCount(0);
+  await page.getByLabel("ค้นหาโครงการ").fill("");
+
+  // add: every problem at its box, then a code another project has
+  await page.getByRole("button", { name: "เพิ่มโครงการ" }).click();
+  const form = page.getByRole("form", { name: "เพิ่มโครงการ" });
+  await form.getByRole("button", { name: "เพิ่มโครงการ" }).click();
+  await expect(form.getByText("ใส่รหัสโครงการ เช่น PNKK")).toBeVisible();
+  await expect(form.getByText("ใส่ชื่อโครงการ")).toBeVisible();
+  await form.getByLabel("รหัสโครงการ").fill("demo1");
+  await form.getByLabel("ชื่อโครงการ").fill("โครงการทดสอบ e2e");
+  await form.getByRole("button", { name: "เพิ่มโครงการ" }).click();
+  await expect(form.getByText(/รหัส DEMO1 มีโครงการ .* ใช้อยู่แล้ว/)).toBeVisible();
+  await form.getByLabel("รหัสโครงการ").fill("e2e-p1");
+  await form.getByLabel(/รหัสบัญชี/).fill("ACC-9");
+  await form.getByLabel(/ที่ตั้งไซต์/).fill("ปากซอย 5 ข้างวัด"); // OBS-23: shown on the driver's phone
+  await form.getByRole("button", { name: "เพิ่มโครงการ" }).click();
+  await expect(page.getByText("เพิ่มโครงการ E2E-P1 แล้ว")).toBeVisible();
+  const row = page.getByRole("row").filter({ hasText: "E2E-P1" });
+  await expect(row).toContainText("ACC-9");
+  await expect(row).toContainText("ที่ตั้ง: ปากซอย 5 ข้างวัด");
+  await expect(row).toContainText("เพิ่มเองใน MYOIL");
+  await expect(page.getByRole("row").filter({ hasText: "DEMO1" })).toContainText("จาก BookCare");
+  await expect(row).toContainText("เปิด");
+
+  // a new project can be chosen on the route page at once
+  await page.goto("/routes");
+  await expect(page.locator('select[name="projectId"] option', { hasText: "E2E-P1" })).toHaveCount(1);
+
+  // rename, close (gone from the route picker), open again
+  await page.goto("/settings/projects");
+  await page.getByRole("button", { name: "แก้ไขโครงการ E2E-P1" }).click();
+  const edit = page.getByRole("form", { name: "แก้ไขโครงการ" });
+  await edit.getByLabel("ชื่อโครงการ").fill("โครงการทดสอบ เปลี่ยนชื่อ");
+  await edit.getByRole("button", { name: "บันทึก", exact: true }).click();
+  await expect(row).toContainText("โครงการทดสอบ เปลี่ยนชื่อ");
+  await page.getByRole("button", { name: "ปิดโครงการ E2E-P1" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "ปิดโครงการนี้" }).click(); // OBS-22: asked first
+  await expect(page.getByText("ปิดโครงการ E2E-P1 แล้ว")).toBeVisible();
+  await page.goto("/routes");
+  await expect(page.locator('select[name="projectId"] option', { hasText: "E2E-P1" })).toHaveCount(0);
+  await page.goto("/settings/projects");
+  await page.getByRole("button", { name: "เปิดโครงการ E2E-P1" }).click();
+  await expect(page.getByText("เปิดโครงการ E2E-P1 แล้ว")).toBeVisible();
 });
 
 test("users: every problem shows at once, then create, sign in, reset password, deactivate", async ({ page }) => {

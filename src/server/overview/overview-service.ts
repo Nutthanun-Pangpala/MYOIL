@@ -8,7 +8,7 @@ import type { Session } from "@/lib/session";
 import { ledgerMonths, loadLedgerMonth, stockOn } from "@/server/ledger/ledger-service";
 import { stockByBill } from "@/server/prices/fifo-service";
 import { visibleProjectIds } from "@/server/projects/project-scope";
-import { billableSql } from "@/server/issues/billable";
+import { billableSql, countsSql } from "@/server/issues/billable";
 import { cycleLabel, listCycles } from "@/server/cycles/cycle-service";
 
 /** everything the overview shows; parts a role may not see come back null */
@@ -34,7 +34,7 @@ export async function loadOverview(session: Session, month: string, today: strin
         .from(schema.fuelIssueLines)
         .innerJoin(schema.fuelIssues, eq(schema.fuelIssues.id, schema.fuelIssueLines.issueId))
         .innerJoin(schema.projects, eq(schema.projects.id, schema.fuelIssues.projectId))
-        .where(and(isNull(schema.fuelIssues.cancelledAt), gte(schema.fuelIssues.issueDate, start), lte(schema.fuelIssues.issueDate, end), scope));
+        .where(and(countsSql, gte(schema.fuelIssues.issueDate, start), lte(schema.fuelIssues.issueDate, end), scope));
 
   const breakdown = projectBreakdown(lines);
   const todaySlips = new Set(lines.filter((l) => l.date === today).map((l) => l.issueId)).size;

@@ -50,6 +50,15 @@ async function main() {
   await db.insert(schema.users).values(DEMO_DRIVERS.map((d) => ({ name: d.name, phone: d.phone, email: driverEmail(d.phone), role: "driver" as const, passwordHash: hashSecret(DEMO_PIN) })));
   await db.insert(schema.users).values(DEMO_USERS.map((u) => ({ ...u, passwordHash: hashSecret(DEMO_PASSWORD) })));
 
+  // projects an e2e run added by hand (ตั้งค่า › โครงการ): a leftover makes the next run's code "already used"
+  // (and test projects the testers made: TESTR18 and the like — owner, 26 Nov 2026: "ล้างเลย")
+  await db.delete(schema.projects).where(or(like(schema.projects.refCode, "E2E-%"), like(schema.projects.refCode, "TEST%"), eq(schema.projects.addedLocally, true)));
+  // the demo projects follow this list again even if someone edited them by hand
+  await db.update(schema.projects).set({ localEditAt: null }).where(inArray(schema.projects.refCode, ["YARD", "DEMO1", "DEMO2"]));
+
+  // SEED_NO_PROJECTS=1 npm run db:seed → a database with no project at all, to test the empty states (tester's GAP-07)
+  if (process.env.SEED_NO_PROJECTS === "1") await db.delete(schema.projects);
+  else
   // placeholder projects until the BookCare link is decided; the yard counts as a project (BA proposal)
   await syncProjects(
     new StaticProjectSource([
@@ -58,6 +67,10 @@ async function main() {
       { refCode: "DEMO2", projectCode: "D002", name: "โครงการตัวอย่าง 2", isActive: true },
     ]),
   );
+
+  // where the demo sites are, as the driver's phone shows it (OBS-23)
+  await db.update(schema.projects).set({ siteDetail: "ซอยลำลูกกา 11 ตรงข้ามปั๊ม ปตท." }).where(eq(schema.projects.refCode, "DEMO1"));
+  await db.update(schema.projects).set({ siteDetail: "ถนนรังสิต-นครนายก คลอง 4 หลังตลาด" }).where(eq(schema.projects.refCode, "DEMO2"));
 
   // one purchase bill today (Bangkok): 5,000 liters at 32.50, so the truck has fuel and a slip keyed today shows an amount
   // (a slip takes its price from the latest bill on or before its date; key one for an earlier date to see "รอราคา")

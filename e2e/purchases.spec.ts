@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { keyIssue, login, recordPurchase, resetData } from "./helpers";
+import { attachBill, keyIssue, login, recordPurchase, resetData } from "./helpers";
 
 // fixed past month: the tests do not depend on today's date
 const DAY = "2026-01-15";
@@ -14,7 +14,22 @@ test("two of three numbers are enough: the third is shown before saving", async 
   const form = page.getByRole("form", { name: "บันทึกการซื้อ" });
   await form.getByLabel("เติมเข้า (ลิตร)").fill("1000");
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
-  await expect(form.getByLabel("จำนวนเงิน (บาท)")).toHaveAttribute("placeholder", "40,000.00");
+  // OBS-17: worked out at once, in the box itself and in words under it
+  await expect(form.getByLabel("จำนวนเงิน (บาท)")).toHaveValue("40000.00");
+  await expect(form.getByTestId("p-calc")).toContainText("จำนวนเงิน 40,000.00 บาท");
+});
+
+test("a new bill needs its photo: saving without one is refused at the photo, and the numbers stay (owner, 26 Nov 2026)", async ({ page }) => {
+  await login(page, "store");
+  await page.goto(`/purchases?month=${MONTH}&new=purchase`);
+  const form = page.getByRole("form", { name: "บันทึกการซื้อ" });
+  await form.getByLabel("วันที่").fill(DAY);
+  await form.getByLabel("เติมเข้า (ลิตร)").fill("1000");
+  await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
+  await form.getByRole("button", { name: "บันทึก", exact: true }).click();
+  await expect(form.getByRole("alert")).toContainText("แนบรูปบิลก่อนบันทึก");
+  await expect(form.getByLabel("เติมเข้า (ลิตร)")).toHaveValue("1000");
+  await expect(page).toHaveURL(/new=purchase/);
 });
 
 test("three numbers that disagree are refused", async ({ page }) => {
@@ -25,6 +40,7 @@ test("three numbers that disagree are refused", async ({ page }) => {
   await form.getByLabel("เติมเข้า (ลิตร)").fill("1000");
   await form.getByLabel("ราคาต่อลิตร (บาท)").fill("40");
   await form.getByLabel("จำนวนเงิน (บาท)").fill("41000");
+  await attachBill(form);
   await form.getByRole("button", { name: "บันทึก", exact: true }).click();
   await expect(form.getByRole("alert")).toContainText("จำนวนเงินไม่ตรง");
 });
@@ -40,7 +56,7 @@ test("a purchase appears in the list with its totals", async ({ page }) => {
   await expect(page.getByRole("row").filter({ hasText: "รวม 1 ครั้ง" })).toContainText("40,000.00");
 
   // no daily price list (owner, 25 Nov 2026): the page says how slips are priced instead, and the bill shows its time
-  await expect(page.getByText("ใบจ่ายใช้น้ำมันของบิลที่เข้าก่อนให้หมดก่อน")).toBeVisible();
+  await expect(page.getByRole("list", { name: "วิธีคิดราคาใบจ่าย" })).toContainText("น้ำมันของบิลที่เข้าก่อนถูกใช้ก่อน");
   await expect(row).toContainText(/\d\d:\d\d น\./);
   await expect(page.getByRole("link", { name: "ตั้งราคาของวันที่ไม่มีการซื้อ" })).toHaveCount(0);
 });

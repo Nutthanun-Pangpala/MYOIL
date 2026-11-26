@@ -90,7 +90,6 @@ export function SignedPhotoCard({
           )}
         </div>
       )}
-      {canEdit && lock && <p className="text-sm text-muted">{lock}</p>}
       {busy && <p className="text-[14px] text-muted">กำลังบันทึกรูป…</p>}
       {msg && (
         <p role="alert" className="text-[14px] text-repair">

@@ -13,3 +13,6 @@ storage
 # playwright
 /test-results/
 /playwright-report/
+
+# results of `npm run check`
+.check/

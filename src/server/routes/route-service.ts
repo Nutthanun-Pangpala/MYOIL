@@ -17,6 +17,8 @@ export type StopView = {
   projectId: string;
   projectRefCode: string;
   projectName: string;
+  /** where the site is (address / landmark), typed on ตั้งค่า › โครงการ */
+  projectDetail: string | null;
   note: string | null;
   status: StopStatus;
   issueId: string | null;
@@ -36,6 +38,7 @@ export async function routeForDate(date: string, q: Db = db): Promise<RouteView>
       s: fuelRouteStops,
       refCode: projects.refCode,
       name: projects.name,
+      detail: projects.siteDetail,
       issueRef: fuelIssues.externalRef,
       cancelled: fuelIssues.cancelledAt,
       bookNo: fuelIssues.bookNo,
@@ -50,7 +53,7 @@ export async function routeForDate(date: string, q: Db = db): Promise<RouteView>
     id: r.id,
     date: r.routeDate,
     updatedAt: r.updatedAt,
-    stops: rows.map(({ s, refCode, name, issueRef, cancelled, bookNo, docNo }) => {
+    stops: rows.map(({ s, refCode, name, detail, issueRef, cancelled, bookNo, docNo }) => {
       const status = stopStatus({ issueId: s.issueId, issueCancelled: !!cancelled, skipRef: s.skipRef });
       return {
         id: s.id,
@@ -58,6 +61,7 @@ export async function routeForDate(date: string, q: Db = db): Promise<RouteView>
         projectId: s.projectId,
         projectRefCode: refCode,
         projectName: name,
+        projectDetail: detail,
         note: s.note,
         status,
         issueId: status === "filled" ? s.issueId : null,

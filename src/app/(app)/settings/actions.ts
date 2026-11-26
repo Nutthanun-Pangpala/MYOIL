@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdministrator } from "@/lib/session";
 import { createDriver, resetDriverPin, setDriverActive, updateDriver } from "@/server/settings/driver-service";
-import { createUser, resetPassword, saveCutDay, saveMachine, saveTank, setUserActive, updateCycleDates, updateUser } from "@/server/settings/settings-service";
+import { createUser, resetPassword, saveCutDay, saveMachine, saveProject, saveTank, setProjectActive, setUserActive, updateCycleDates, updateUser } from "@/server/settings/settings-service";
 
 const isId = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v);
 const s = (v: unknown, max = 200) => (typeof v === "string" ? v.slice(0, max) : "");
@@ -20,6 +20,25 @@ export async function saveMachineAction(id: string | null, raw: unknown) {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   if (id !== null && !isId(id)) return bad;
   return done(await saveMachine(id, { code: s(r.code, 100), name: s(r.name, 100), type: s(r.type, 50), assetCode: s(r.assetCode, 50), isRented: r.isRented === true }), "/settings/machines");
+}
+
+/** projects feed the slip form, the routes and the invoices: every page that lists them is stale after a change */
+const projectsChanged = <T extends { ok: boolean }>(r: T) => {
+  if (r.ok) revalidatePath("/", "layout");
+  return r;
+};
+
+export async function saveProjectAction(id: string | null, raw: unknown) {
+  await requireAdministrator();
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  if (id !== null && !isId(id)) return bad;
+  return projectsChanged(await saveProject(id, { ref: s(r.ref, 40), name: s(r.name, 300), code: s(r.code, 60), detail: s(r.detail, 400) }));
+}
+
+export async function setProjectActiveAction(id: string, active: boolean) {
+  await requireAdministrator();
+  if (!isId(id)) return bad;
+  return projectsChanged(await setProjectActive(id, active === true));
 }
 
 export async function createUserAction(raw: unknown) {

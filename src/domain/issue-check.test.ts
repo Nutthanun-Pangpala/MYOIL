@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkIssue, machineKey, nextDocNo, type IssueContext, type IssueInput } from "./issue-check";
+import { checkIssue, machineKey, nextDocNo, type IssueContext, type IssueInput, FUTURE_DATE } from "./issue-check";
 
 const ok: IssueInput = {
   bookNo: "0229",
@@ -52,6 +52,18 @@ describe("checkIssue — blocking errors", () => {
   it("signed without a name blocks; unsigned without a name does not", () => {
     expect(checkIssue({ ...ok, receiverName: " " }, clean).errors.receiver).toBeDefined();
     expect(checkIssue({ ...ok, receivedSigned: false, receiverName: "" }, clean).ok).toBe(true);
+  });
+});
+
+describe("checkIssue — no slip is dated in the future (BA, 26 Nov 2026)", () => {
+  it("refuses a date after today, accepts today and earlier, and says nothing when today is not given", () => {
+    const base = { bookNo: "1", docNo: "1", projectId: "p", timeIn: "", timeOut: "", fuelDriver: "", machineDriver: "", lines: [{ machine: "PC210", hourMeter: null, liters: 10 }], receivedSigned: false, receiverName: "" };
+    const on = (issueDate: string, today?: string) => checkIssue({ ...base, issueDate }, { ...clean, today });
+    expect(on("2026-11-27", "2026-11-26").errors.date).toBe(FUTURE_DATE);
+    expect(on("2026-11-27", "2026-11-26").ok).toBe(false);
+    expect(on("2026-11-26", "2026-11-26").errors.date).toBeUndefined();
+    expect(on("2026-11-01", "2026-11-26").errors.date).toBeUndefined();
+    expect(on("2026-11-27").errors.date).toBeUndefined();
   });
 });
 

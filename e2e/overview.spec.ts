@@ -2,8 +2,6 @@ import { expect, test } from "@playwright/test";
 import { keyIssue, login, recordPurchase, resetData } from "./helpers";
 
 const TODAY = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
-const [Y, M] = TODAY.split("-").map(Number);
-const MONTH_END = `${TODAY.slice(0, 8)}${String(new Date(Date.UTC(Y, M, 0)).getUTCDate()).padStart(2, "0")}`;
 
 test.describe.configure({ mode: "serial" });
 test.beforeAll(async ({ browser, baseURL }) => {
@@ -77,16 +75,17 @@ test("a month with a purchase is offered on every month page (BUG-03)", async ({
   }
 });
 
-// last in the file: it leaves a slip dated later this month behind
-test("a slip dated later this month is not in this month's figures yet (BUG-05)", async ({ page }) => {
-  test.skip(MONTH_END === TODAY, "today is the last day of the month: there is no later day to key");
+test("a slip cannot be dated after today, so this month's figures never run ahead (BUG-05; BA 26 Nov 2026)", async ({ page }) => {
   await login(page, "store");
-  const slips = page.getByRole("link", { name: /ใบจ่าย.*ใบ/ }).first();
-  const out = page.getByRole("link", { name: /^จ่ายออก/ }).first();
-  // textContent on both sides: innerText puts line breaks between the card's parts, toHaveText does not
-  const before = { slips: (await slips.textContent()) ?? "", out: (await out.textContent()) ?? "" };
-  await keyIssue(page, { book: "5", doc: "9", date: MONTH_END, project: "DEMO1", machine: "O-A", liters: "90" });
-  await page.goto("/");
-  await expect(slips).toHaveText(before.slips);
-  await expect(out).toHaveText(before.out);
+  const tomorrow = new Date(Date.now() + 86_400_000).toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  await page.goto("/issues/new");
+  await page.getByLabel("เล่มที่").fill("5");
+  await page.getByLabel("เลขที่", { exact: true }).fill("9");
+  await page.getByLabel(/^วันที่/).fill(tomorrow);
+  await page.getByLabel("โครงการ").fill("DEMO1");
+  await page.getByLabel("รายการหรือรหัสเครื่องจักร").first().fill("O-A");
+  await page.getByLabel("จำนวนน้ำมัน (ลิตร)").first().fill("90");
+  await page.getByRole("button", { name: "บันทึก", exact: true }).click();
+  await expect(page.getByText("ลงวันที่ล่วงหน้าไม่ได้ วันที่ในใบต้องไม่เกินวันนี้").first()).toBeVisible();
+  await expect(page).toHaveURL(/\/issues\/new/);
 });
