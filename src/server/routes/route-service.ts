@@ -173,8 +173,9 @@ export async function addStop(userId: string, date: string, projectId: string, n
   return { ok: true };
 }
 
-async function changeable(stopId: string) {
-  const [row] = await db
+/** inside a transaction pass its `tx`: on Vercel the pool has one connection, and the transaction holds it */
+async function changeable(stopId: string, q: Db = db) {
+  const [row] = await q
     .select({ s: fuelRouteStops, cancelled: fuelIssues.cancelledAt })
     .from(fuelRouteStops)
     .leftJoin(fuelIssues, eq(fuelIssues.id, fuelRouteStops.issueId))
@@ -202,7 +203,7 @@ export async function moveRouteStop(stopId: string, dir: -1 | 1): Promise<PlanRe
     const moved = moveStop(all, stopId, dir);
     const swappedWith = moved.find((s) => s.position === all.find((x) => x.id === stopId)!.position && s.id !== stopId);
     if (swappedWith) {
-      const other = await changeable(swappedWith.id);
+      const other = await changeable(swappedWith.id, tx);
       if (!other.ok) return { ok: false, message: "สลับกับจุดที่เติมแล้วไม่ได้" };
     }
     await writeOrder(tx, c.stop.routeId, moved);

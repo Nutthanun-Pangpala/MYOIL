@@ -97,3 +97,54 @@ test("copy yesterday's route into an empty day; viewers of other roles can't pla
   await page.goto("/routes");
   await expect(page).toHaveURL("/");
 });
+
+// On Vercel the pool has ONE connection (src/db/index.ts), and a move used to query outside its own transaction → the POST hung 300 s.
+// A plain local run has a full pool and can't show that hang. To check it the Vercel way:
+//   VERCEL=1 BOOKCARE_PUSH_KEY=<TEST_PUSH_KEY> npx next dev -p 3100   then   npx playwright test e2e/routes.spec.ts
+test("moving a stop down and up swaps the order", async ({ page }) => {
+  await login(page, "store");
+  await page.goto("/routes?date=2026-12-05");
+  await addStop(page, "DEMO1 · ตัวอย่าง 1", "แรก");
+  await addStop(page, "DEMO2 · ตัวอย่าง 2", "สอง");
+  await page.getByRole("button", { name: "เลื่อนจุดที่ 1 ลง" }).click();
+  await expect(page.getByRole("status")).toHaveText("สลับลำดับแล้ว");
+  await expect(page.getByLabel("หมายเหตุจุดที่ 1")).toHaveValue("สอง");
+  await expect(page.getByLabel("หมายเหตุจุดที่ 2")).toHaveValue("แรก");
+  await page.getByRole("button", { name: "เลื่อนจุดที่ 2 ขึ้น" }).click();
+  await expect(page.getByLabel("หมายเหตุจุดที่ 1")).toHaveValue("แรก");
+  await expect(page.getByLabel("หมายเหตุจุดที่ 2")).toHaveValue("สอง");
+});
+
+test("a day picked in the date box is the day the new stop goes to, not today", async ({ page, request }) => {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const count = async (d: string) => (await (await request.get(`/api/bookcare/v1/route?date=${d}`, { headers: auth })).json()).stops.length as number;
+  const [beforeToday, beforeTomorrow] = [await count(today), await count(tomorrow)];
+
+  await login(page, "store");
+  await page.goto("/routes");
+  await expect(page.getByTestId("route-day-note")).toHaveCount(0);
+  // no "ดู" press: changing the box loads that day
+  await page.getByLabel("วันที่").fill(tomorrow);
+  await expect(page).toHaveURL(new RegExp(`date=${tomorrow}`));
+  await expect(page.getByTestId("route-day-note")).toContainText("กำลังวางเส้นทางล่วงหน้า");
+  const form = page.getByRole("form", { name: "เพิ่มจุดเติม" });
+  await expect(form.getByRole("button", { name: /^เพิ่มจุดเติม · / })).toHaveText(/\d{1,2} \S+ \d{2}$/);
+  await addStop(page, "DEMO1 · ตัวอย่าง 1", "สั่งล่วงหน้า");
+
+  expect(await count(tomorrow)).toBe(beforeTomorrow + 1);
+  expect(await count(today)).toBe(beforeToday);
+
+  // typing / arrow keys load only once they stop: two quick presses move two days, not one
+  await page.goto("/routes?date=2026-12-05");
+  await page.getByLabel("วันที่").focus();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  // which part has the focus depends on the browser's date layout: 2 steps of the day (12-07) or of the month (12 → 02, same year)
+  await expect(page).toHaveURL(/date=(2026-12-07|2026-02-05)$/);
+
+  // the "พรุ่งนี้" shortcut from another day
+  await page.goto("/routes");
+  await page.getByRole("link", { name: "พรุ่งนี้" }).click();
+  await expect(page).toHaveURL(new RegExp(`date=${tomorrow}`));
+});
