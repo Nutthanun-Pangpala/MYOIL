@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { Button, Card, Pill, linkButton } from "@/components/ui";
+import { Button, Card, Notice, Pill, linkButton } from "@/components/ui";
 import { isRealDate } from "@/domain/bookcare-api";
 import { addDays } from "@/domain/iso-date";
 import { thaiLong } from "@/domain/thai-date";
@@ -12,6 +12,7 @@ import { canWriteFuel } from "@/lib/permissions";
 import { requireUser } from "@/lib/session";
 import { routeForDate } from "@/server/routes/route-service";
 import { addStopAction, copyAction, moveAction, noteAction, removeAction } from "./actions";
+import { DayInput } from "./day-input";
 
 export const metadata = { title: "เส้นทางรถเติมน้ำมัน" };
 
@@ -27,6 +28,7 @@ export default async function RoutesPage({ searchParams }: { searchParams: SP })
   if (!canOpen(session.role, "/routes")) redirect("/");
   const sp = await searchParams;
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  const tomorrow = addDays(today, 1);
   const date = isRealDate(one(sp.date)) ? one(sp.date) : today;
   const writer = canWriteFuel(session);
   const [route, projectList] = await Promise.all([
@@ -51,14 +53,27 @@ export default async function RoutesPage({ searchParams }: { searchParams: SP })
           </Link>
           <label className="flex flex-col gap-1">
             <span className="text-[13px] text-muted">วันที่</span>
-            <input type="date" name="date" defaultValue={date} className="min-h-11 rounded-control border border-idle bg-card px-3" />
+            <DayInput key={date} date={date} />
           </label>
           <Link href={`/routes?date=${addDays(date, 1)}`} className={linkButton()} aria-label="วันถัดไป">
             ›
           </Link>
           <Button type="submit">ดู</Button>
+          {date !== tomorrow && (
+            <Link href={`/routes?date=${tomorrow}`} className={linkButton()}>
+              พรุ่งนี้
+            </Link>
+          )}
         </form>
       </header>
+
+      {date !== today && (
+        <Notice>
+          <span data-testid="route-day-note">
+            {date > today ? "กำลังวางเส้นทางล่วงหน้า" : "กำลังดูเส้นทางย้อนหลัง"} ของวันที่ <strong>{thaiLong(date)}</strong> (วันนี้คือ {thaiLong(today)})
+          </span>
+        </Notice>
+      )}
 
       {msg && (
         <p role="status" className="rounded-control bg-working-soft px-4 py-2 font-semibold text-working">
@@ -225,7 +240,7 @@ export default async function RoutesPage({ searchParams }: { searchParams: SP })
               <input name="note" className="min-h-11 rounded-control border border-idle bg-card px-3" />
             </label>
             <Button type="submit" variant="primary">
-              เพิ่มจุดเติม
+              เพิ่มจุดเติม · {thaiLong(date)}
             </Button>
           </form>
         )}
